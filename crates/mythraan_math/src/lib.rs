@@ -2,6 +2,7 @@
 
 pub mod aabb;
 pub mod frustum;
+pub mod obb;
 pub mod plane;
 pub mod prelude;
 pub mod ray;
