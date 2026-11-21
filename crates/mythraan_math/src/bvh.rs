@@ -1,5 +1,7 @@
 //! Static bounding volume hierarchies.
 
+use glam::Vec3;
+
 use crate::aabb::Aabb;
 
 /// A node in a bounding volume hierarchy.
@@ -41,12 +43,23 @@ pub struct Bvh {
 }
 
 impl Bvh {
-    /// Builds a balanced tree from finite, ordered boxes and their payload IDs.
+    /// Builds a balanced tree by splitting finite, ordered boxes at the centroid median.
+    ///
+    /// Payload IDs are preserved and may repeat. Equal split keys follow input order.
     #[must_use]
     pub fn build(items: impl IntoIterator<Item = (Aabb, u32)>) -> Self {
-        let items: Vec<_> = items.into_iter().collect();
+        let mut items: Vec<_> = items
+            .into_iter()
+            .enumerate()
+            .map(|(input_index, (bounds, payload))| BuildItem {
+                bounds,
+                centroid: bounds.center(),
+                payload,
+                input_index,
+            })
+            .collect();
         let mut nodes = Vec::with_capacity(items.len().saturating_mul(2).saturating_sub(1));
-        let root = append_subtree(&items, &mut nodes).map(|(index, _)| index);
+        let root = append_subtree(&mut items, &mut nodes).map(|(index, _)| index);
         Self { nodes, root }
     }
 
@@ -63,13 +76,60 @@ impl Bvh {
     }
 }
 
-fn append_subtree(items: &[(Aabb, u32)], nodes: &mut Vec<BvhNode>) -> Option<(usize, Aabb)> {
+struct BuildItem {
+    bounds: Aabb,
+    centroid: Vec3,
+    payload: u32,
+    input_index: usize,
+}
+
+enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+impl Axis {
+    fn widest(items: &[BuildItem]) -> Self {
+        let (min, max) = items.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(min, max), item| (min.min(item.centroid), max.max(item.centroid)),
+        );
+        let span = max.as_dvec3() - min.as_dvec3();
+        if span.x >= span.y && span.x >= span.z {
+            Self::X
+        } else if span.y >= span.z {
+            Self::Y
+        } else {
+            Self::Z
+        }
+    }
+
+    fn component(&self, centroid: Vec3) -> f32 {
+        match self {
+            Self::X => centroid.x,
+            Self::Y => centroid.y,
+            Self::Z => centroid.z,
+        }
+    }
+}
+
+fn append_subtree(items: &mut [BuildItem], nodes: &mut Vec<BvhNode>) -> Option<(usize, Aabb)> {
     let node = match items {
         [] => return None,
-        &[(bounds, payload)] => BvhNode::Leaf { bounds, payload },
+        [item] => BvhNode::Leaf {
+            bounds: item.bounds,
+            payload: item.payload,
+        },
         _ => {
             let middle = items.len() / 2;
-            let (left_items, right_items) = items.split_at_checked(middle)?;
+            let axis = Axis::widest(items);
+            items.select_nth_unstable_by(middle, |left, right| {
+                axis.component(left.centroid)
+                    .total_cmp(&axis.component(right.centroid))
+                    .then_with(|| left.input_index.cmp(&right.input_index))
+            });
+            let (left_items, right_items) = items.split_at_mut_checked(middle)?;
             let (left, left_bounds) = append_subtree(left_items, nodes)?;
             let (right, right_bounds) = append_subtree(right_items, nodes)?;
             BvhNode::Branch {
@@ -88,7 +148,6 @@ fn append_subtree(items: &[(Aabb, u32)], nodes: &mut Vec<BvhNode>) -> Option<(us
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glam::Vec3;
 
     #[test]
     fn both_node_kinds_expose_their_bounds() {
@@ -166,5 +225,29 @@ mod tests {
                 payload: 2
             }
         );
+    }
+
+    #[test]
+    fn splits_at_the_centroid_median_on_the_widest_axis() {
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+            let items = [12.0, -10.0, 10.0, -12.0].map(|coordinate| {
+                let point = axis * coordinate;
+                (
+                    Aabb {
+                        min: point,
+                        max: point,
+                    },
+                    0,
+                )
+            });
+            let tree = Bvh::build(items);
+            let BvhNode::Branch { left, right, .. } = tree.nodes()[tree.root_index().unwrap()]
+            else {
+                panic!("expected a branch");
+            };
+
+            assert_eq!(tree.nodes()[left].bounds(), items[1].0.merge(items[3].0));
+            assert_eq!(tree.nodes()[right].bounds(), items[0].0.merge(items[2].0));
+        }
     }
 }
