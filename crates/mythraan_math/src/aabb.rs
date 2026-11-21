@@ -38,6 +38,27 @@ impl Aabb {
             max: self.max.max(other.max),
         }
     }
+
+    /// Bounds a set of points. Returns `None` for empty input or non-finite points.
+    #[must_use]
+    pub fn from_points(points: impl IntoIterator<Item = Vec3>) -> Option<Self> {
+        let mut points = points.into_iter();
+        let first = points.next().filter(|point| point.is_finite())?;
+        let mut bounds = Self {
+            min: first,
+            max: first,
+        };
+
+        for point in points {
+            if !point.is_finite() {
+                return None;
+            }
+            bounds.min = bounds.min.min(point);
+            bounds.max = bounds.max.max(point);
+        }
+
+        Some(bounds)
+    }
 }
 
 #[cfg(test)]
@@ -145,5 +166,43 @@ mod tests {
         };
 
         assert_eq!(box_bounds.merge(point), box_bounds);
+    }
+
+    #[test]
+    fn from_points_finds_tight_bounds_for_an_unordered_cloud() {
+        let points = [
+            Vec3::new(2.0, -1.0, 4.0),
+            Vec3::new(-5.0, 3.0, 2.0),
+            Vec3::new(1.0, 1.0, -6.0),
+        ];
+        let expected = Aabb {
+            min: Vec3::new(-5.0, -1.0, -6.0),
+            max: Vec3::new(2.0, 3.0, 4.0),
+        };
+
+        assert_eq!(Aabb::from_points(points), Some(expected));
+    }
+
+    #[test]
+    fn from_points_with_one_point_creates_a_degenerate_box() {
+        let point = Vec3::new(-2.0, 4.0, 6.0);
+
+        assert_eq!(
+            Aabb::from_points([point]),
+            Some(Aabb {
+                min: point,
+                max: point
+            })
+        );
+    }
+
+    #[test]
+    fn from_points_rejects_empty_and_non_finite_input() {
+        assert_eq!(Aabb::from_points([]), None);
+        assert_eq!(Aabb::from_points([Vec3::NAN, Vec3::ZERO]), None);
+        assert_eq!(
+            Aabb::from_points([Vec3::ZERO, Vec3::splat(f32::INFINITY)]),
+            None
+        );
     }
 }
