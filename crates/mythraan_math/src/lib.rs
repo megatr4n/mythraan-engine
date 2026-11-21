@@ -5,6 +5,7 @@ pub mod frustum;
 pub mod plane;
 pub mod prelude;
 pub mod ray;
+pub mod sphere;
 pub mod transform;
 
 pub use glam;
