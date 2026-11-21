@@ -29,6 +29,15 @@ impl Aabb {
     pub fn contains_point(self, point: Vec3) -> bool {
         point.cmpge(self.min).all() && point.cmple(self.max).all()
     }
+
+    /// Returns the smallest box that encloses both boxes.
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            min: self.min.min(other.min),
+            max: self.max.max(other.max),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -103,5 +112,38 @@ mod tests {
 
         assert!(bounds.contains_point(point));
         assert!(!bounds.contains_point(point + Vec3::Z));
+    }
+
+    #[test]
+    fn merge_encloses_disjoint_boxes_and_is_order_independent() {
+        let first = Aabb {
+            min: Vec3::new(-2.0, 1.0, -4.0),
+            max: Vec3::new(-1.0, 2.0, 1.0),
+        };
+        let second = Aabb {
+            min: Vec3::new(3.0, -1.0, -2.0),
+            max: Vec3::new(4.0, 3.0, 2.0),
+        };
+        let expected = Aabb {
+            min: Vec3::new(-2.0, -1.0, -4.0),
+            max: Vec3::new(4.0, 3.0, 2.0),
+        };
+
+        assert_eq!(first.merge(second), expected);
+        assert_eq!(second.merge(first), expected);
+    }
+
+    #[test]
+    fn merge_with_an_enclosed_point_keeps_the_box() {
+        let box_bounds = Aabb {
+            min: Vec3::ZERO,
+            max: Vec3::ONE,
+        };
+        let point = Aabb {
+            min: Vec3::splat(0.5),
+            max: Vec3::splat(0.5),
+        };
+
+        assert_eq!(box_bounds.merge(point), box_bounds);
     }
 }
