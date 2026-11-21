@@ -6,6 +6,7 @@ use glam::Vec3;
 
 use crate::aabb::Aabb;
 
+mod dynamic;
 mod queries;
 
 /// A node in a bounding volume hierarchy.
@@ -46,6 +47,8 @@ pub struct BvhLeafId(usize);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct NodeLinks {
     leaf: Option<BvhLeafId>,
+    parent: Option<usize>,
+    height: usize,
 }
 
 /// A binary hierarchy over axis-aligned bounding boxes.
@@ -55,6 +58,7 @@ pub struct Bvh {
     root: Option<usize>,
     links: Vec<NodeLinks>,
     leaf_indices: BTreeMap<BvhLeafId, usize>,
+    next_leaf_id: usize,
 }
 
 impl Bvh {
@@ -78,18 +82,33 @@ impl Bvh {
         let mut links = vec![NodeLinks::default(); nodes.len()];
         let mut leaf_indices = BTreeMap::new();
         for (index, node) in nodes.iter().enumerate() {
-            if matches!(node, BvhNode::Leaf { .. }) {
-                let id = BvhLeafId(leaf_indices.len());
-                if let Some(link) = links.get_mut(index) {
-                    link.leaf = Some(id);
+            match *node {
+                BvhNode::Leaf { .. } => {
+                    let id = BvhLeafId(leaf_indices.len());
+                    if let Some(link) = links.get_mut(index) {
+                        link.leaf = Some(id);
+                    }
+                    leaf_indices.insert(id, index);
                 }
-                leaf_indices.insert(id, index);
+                BvhNode::Branch { left, right, .. } => {
+                    let mut height = 0;
+                    for child in [left, right] {
+                        if let Some(link) = links.get_mut(child) {
+                            link.parent = Some(index);
+                            height = height.max(link.height + 1);
+                        }
+                    }
+                    if let Some(link) = links.get_mut(index) {
+                        link.height = height;
+                    }
+                }
             }
         }
         Self {
             nodes,
             root,
             links,
+            next_leaf_id: leaf_indices.len(),
             leaf_indices,
         }
     }
