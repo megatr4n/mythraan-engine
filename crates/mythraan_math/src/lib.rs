@@ -1,6 +1,7 @@
 //! Math primitives for the Mythraan engine.
 
 pub mod aabb;
+pub mod bvh;
 pub mod color;
 pub mod frustum;
 pub mod obb;
