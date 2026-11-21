@@ -1,13 +1,14 @@
 //! View frusta and volume tests.
 
-use glam::{DVec3, DVec4, Mat4, Vec3};
+use glam::{DVec3, Mat4, Vec3};
 
 use crate::aabb::Aabb;
+use crate::plane::Plane;
 
 /// A view volume bounded by six inward-facing planes with unit normals.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frustum {
-    planes: [DVec4; 6],
+    planes: [Plane; 6],
 }
 
 impl Frustum {
@@ -25,14 +26,14 @@ impl Frustum {
         let y = matrix.row(1);
         let z = matrix.row(2);
         let w = matrix.row(3);
-        let mut planes = [w + x, w - x, w + y, w - y, z, w - z];
-        for plane in &mut planes {
-            let length = plane.truncate().length();
-            if length == 0.0 {
-                return None;
-            }
-            *plane /= length;
-        }
+        let planes = [
+            Plane::from_equation(w + x)?,
+            Plane::from_equation(w - x)?,
+            Plane::from_equation(w + y)?,
+            Plane::from_equation(w - y)?,
+            Plane::from_equation(z)?,
+            Plane::from_equation(w - z)?,
+        ];
 
         Some(Self { planes })
     }
@@ -40,8 +41,10 @@ impl Frustum {
     /// Returns whether a world-space point lies inside or on the boundary.
     #[must_use]
     pub fn contains_point(&self, point: Vec3) -> bool {
-        let point = point.as_dvec3().extend(1.0);
-        self.planes.iter().all(|plane| plane.dot(point) >= 0.0)
+        let point = point.as_dvec3();
+        self.planes
+            .iter()
+            .all(|plane| plane.signed_distance_f64(point) >= 0.0)
     }
 
     /// Returns false when any frustum plane excludes the entire world-space box.
@@ -53,9 +56,9 @@ impl Frustum {
         let min = bounds.min.as_dvec3();
         let max = bounds.max.as_dvec3();
         self.planes.iter().all(|plane| {
-            let normal = plane.truncate();
+            let normal = plane.normal_f64();
             let furthest = DVec3::select(normal.cmpge(DVec3::ZERO), max, min);
-            plane.dot(furthest.extend(1.0)) >= 0.0
+            plane.signed_distance_f64(furthest) >= 0.0
         })
     }
 }
@@ -83,7 +86,7 @@ mod tests {
         let frustum = perspective();
 
         for plane in frustum.planes {
-            assert!((plane.truncate().length() - 1.0).abs() < 1.0e-12);
+            assert!((plane.normal_f64().length() - 1.0).abs() < 1.0e-12);
         }
     }
 
