@@ -1,5 +1,6 @@
 use super::{Bvh, BvhNode};
 use crate::aabb::Aabb;
+use crate::frustum::Frustum;
 use crate::ray::Ray;
 
 impl Bvh {
@@ -55,6 +56,21 @@ impl Bvh {
     /// Payload IDs may repeat. Result order is unspecified.
     #[must_use]
     pub fn query_aabb(&self, query: &Aabb) -> Vec<u32> {
+        self.query_bounds(|bounds| {
+            bounds.min.cmple(query.max).all() && query.min.cmple(bounds.max).all()
+        })
+    }
+
+    /// Returns one payload per leaf box that passes the frustum's plane tests.
+    ///
+    /// The result can include disjoint boxes near frustum edges. Payload IDs
+    /// may repeat, and result order is unspecified.
+    #[must_use]
+    pub fn query_frustum(&self, frustum: &Frustum) -> Vec<u32> {
+        self.query_bounds(|bounds| frustum.intersects_aabb(bounds))
+    }
+
+    fn query_bounds(&self, overlaps: impl Fn(&Aabb) -> bool) -> Vec<u32> {
         let mut payloads = Vec::new();
         let Some(root) = self.root_index() else {
             return payloads;
@@ -65,8 +81,7 @@ impl Bvh {
             let Some(node) = self.nodes().get(index) else {
                 continue;
             };
-            let bounds = node.bounds();
-            if !bounds.min.cmple(query.max).all() || !query.min.cmple(bounds.max).all() {
+            if !overlaps(&node.bounds()) {
                 continue;
             }
 
@@ -83,7 +98,7 @@ impl Bvh {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glam::Vec3;
+    use glam::{Mat4, Vec3};
 
     #[test]
     fn raycast_returns_nearest_payload_and_breaks_ties_by_id() {
@@ -144,5 +159,28 @@ mod tests {
 
         assert_eq!(tree.query_aabb(&bounds), vec![7, 7]);
         assert!(Bvh::default().query_aabb(&bounds).is_empty());
+    }
+
+    #[test]
+    fn query_frustum_keeps_visible_and_boundary_boxes() {
+        let frustum = Frustum::from_view_projection(&Mat4::IDENTITY).unwrap();
+        let inside = Aabb {
+            min: Vec3::splat(0.25),
+            max: Vec3::splat(0.5),
+        };
+        let touching = Aabb {
+            min: Vec3::Z,
+            max: Vec3::Z * 2.0,
+        };
+        let outside = Aabb {
+            min: -Vec3::ONE,
+            max: -Vec3::splat(0.25),
+        };
+        let tree = Bvh::build([(outside, 4), (inside, 2), (touching, 5)]);
+        let mut hits = tree.query_frustum(&frustum);
+        hits.sort_unstable();
+
+        assert_eq!(hits, vec![2, 5]);
+        assert!(Bvh::default().query_frustum(&frustum).is_empty());
     }
 }
