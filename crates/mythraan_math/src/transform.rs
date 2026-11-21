@@ -27,19 +27,15 @@ impl Transform {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
 
-    /// Applies `child` first, then this transform, preserving any resulting shear.
+    /// Applies `child` first, then `self`. The result can store shear.
     ///
     /// ```
     /// use mythraan_math::{glam::Vec3, prelude::Transform};
     ///
-    /// let parent = Transform {
-    ///     scale: Vec3::splat(2.0),
-    ///     ..Transform::IDENTITY
-    /// };
-    /// let child = Transform {
-    ///     translation: Vec3::X,
-    ///     ..Transform::IDENTITY
-    /// };
+    /// let mut parent = Transform::IDENTITY;
+    /// parent.scale = Vec3::splat(2.0);
+    /// let mut child = Transform::IDENTITY;
+    /// child.translation = Vec3::X;
     /// assert_eq!(parent.compose(child).0.transform_point3(Vec3::ZERO), Vec3::X * 2.0);
     /// ```
     #[must_use]
@@ -47,16 +43,14 @@ impl Transform {
         GlobalTransform::from(self).compose(child.into())
     }
 
-    /// Returns the inverse matrix, or `None` if no finite inverse can be represented.
+    /// Returns the inverse matrix. See [`GlobalTransform::inverse`] for failure cases.
     #[must_use]
     pub fn inverse(self) -> Option<GlobalTransform> {
         GlobalTransform::from(self).inverse()
     }
 
-    /// Points local `-Z` at `target` and aligns local `+Y` with the projected `up`.
-    ///
-    /// The target and up direction are in parent coordinates. Translation and scale
-    /// are preserved. Returns `None` if the inputs cannot define an orientation.
+    /// Changes only rotation, aiming `-Z` at `target` and `+Y` toward `up` in parent space.
+    /// Returns `None` if the directions are invalid or nearly parallel.
     #[must_use]
     pub fn looking_at(mut self, target: Vec3, up: Vec3) -> Option<Self> {
         let forward = (target.as_dvec3() - self.translation.as_dvec3()).try_normalize()?;
@@ -95,10 +89,10 @@ impl GlobalTransform {
         Self(self.0 * child.0)
     }
 
-    /// Returns the inverse matrix, or `None` if no finite inverse can be represented.
+    /// Inverts the matrix, returning `None` if it is singular or the inverse is non-finite.
     #[must_use]
     pub fn inverse(self) -> Option<Self> {
-        // A determinant in f32 can underflow or overflow even for invertible scales.
+        // Use f64 to avoid determinant underflow or overflow at extreme scales.
         let matrix = self.0.as_dmat4();
         let determinant = matrix.determinant();
         if determinant == 0.0 || !determinant.is_finite() {
@@ -109,10 +103,9 @@ impl GlobalTransform {
         inverse.is_finite().then_some(Self(inverse))
     }
 
-    /// Decomposes the matrix into scale, rotation, and translation.
-    ///
-    /// Returns `None` for non-finite or non-affine matrices, zero-length axes, or
-    /// shear beyond floating-point tolerance. A reflection uses a negative X scale.
+    /// Extracts a local transform, encoding a reflection as negative X scale.
+    /// Returns `None` for non-finite or non-affine matrices, shear above tolerance,
+    /// or scales that are zero or cannot be represented.
     #[must_use]
     pub fn try_to_transform(self) -> Option<Transform> {
         let matrix = self.0;
