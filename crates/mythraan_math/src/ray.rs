@@ -1,6 +1,6 @@
 //! Three-dimensional rays.
 
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 use crate::aabb::Aabb;
 
@@ -20,14 +20,38 @@ impl Ray {
     /// rays, and hits whose parameter overflows `f32` return `None`.
     #[must_use]
     pub fn intersects_aabb(self, bounds: &Aabb) -> Option<f32> {
+        let (origin, direction) = self.finite_components()?;
+        Self::intersect_slabs(
+            origin,
+            direction,
+            bounds.min.as_dvec3(),
+            bounds.max.as_dvec3(),
+        )
+    }
+
+    pub(crate) fn finite_components(self) -> Option<(DVec3, DVec3)> {
         if !self.origin.is_finite() || !self.direction.is_finite() || self.direction == Vec3::ZERO {
             return None;
         }
 
+        Some((self.origin.as_dvec3(), self.direction.as_dvec3()))
+    }
+
+    pub(crate) fn forward_hit(parameter: f64) -> Option<f32> {
+        let hit = parameter as f32;
+        (parameter >= 0.0 && hit.is_finite()).then_some(hit)
+    }
+
+    pub(crate) fn intersect_slabs(
+        origin: DVec3,
+        direction: DVec3,
+        min: DVec3,
+        max: DVec3,
+    ) -> Option<f32> {
         let slabs = [
-            (self.origin.x, self.direction.x, bounds.min.x, bounds.max.x),
-            (self.origin.y, self.direction.y, bounds.min.y, bounds.max.y),
-            (self.origin.z, self.direction.z, bounds.min.z, bounds.max.z),
+            (origin.x, direction.x, min.x, max.x),
+            (origin.y, direction.y, min.y, max.y),
+            (origin.z, direction.z, min.z, max.z),
         ];
         let mut entry = 0.0_f64;
         let mut exit = f64::INFINITY;
@@ -39,10 +63,8 @@ impl Ray {
                 continue;
             }
 
-            let origin = f64::from(origin);
-            let direction = f64::from(direction);
-            let first = (f64::from(min) - origin) / direction;
-            let second = (f64::from(max) - origin) / direction;
+            let first = (min - origin) / direction;
+            let second = (max - origin) / direction;
             entry = entry.max(first.min(second));
             exit = exit.min(first.max(second));
             if entry > exit {
@@ -50,8 +72,7 @@ impl Ray {
             }
         }
 
-        let hit = entry as f32;
-        hit.is_finite().then_some(hit)
+        Self::forward_hit(entry)
     }
 }
 
