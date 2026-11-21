@@ -1,6 +1,6 @@
 //! Axis-aligned bounding boxes.
 
-use glam::Vec3;
+use glam::{DVec3, Mat4, Vec3};
 
 /// A box with finite, componentwise ordered corners. Zero-width axes are valid.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +58,33 @@ impl Aabb {
         }
 
         Some(bounds)
+    }
+
+    /// Bounds this box after an affine transformation.
+    ///
+    /// Requires a finite affine matrix and transformed bounds within the `f32` range.
+    #[must_use]
+    pub fn transformed(self, matrix: &Mat4) -> Self {
+        let axes = [
+            (matrix.x_axis.truncate(), self.min.x, self.max.x),
+            (matrix.y_axis.truncate(), self.min.y, self.max.y),
+            (matrix.z_axis.truncate(), self.min.z, self.max.z),
+        ];
+        let mut min = DVec3::ZERO;
+        let mut max = DVec3::ZERO;
+        for (axis, lower, upper) in axes {
+            let axis = axis.as_dvec3();
+            let lower = axis * f64::from(lower);
+            let upper = axis * f64::from(upper);
+            min += lower.min(upper);
+            max += lower.max(upper);
+        }
+
+        let translation = matrix.w_axis.truncate().as_dvec3();
+        Self {
+            min: (min + translation).as_vec3(),
+            max: (max + translation).as_vec3(),
+        }
     }
 }
 
@@ -203,6 +230,52 @@ mod tests {
         assert_eq!(
             Aabb::from_points([Vec3::ZERO, Vec3::splat(f32::INFINITY)]),
             None
+        );
+    }
+
+    #[test]
+    fn transformed_bounds_rotation_reflection_scale_and_translation() {
+        let bounds = Aabb {
+            min: Vec3::new(-1.0, 1.0, 0.0),
+            max: Vec3::new(2.0, 4.0, 2.0),
+        };
+        let matrix = Mat4::from_scale_rotation_translation(
+            Vec3::new(-2.0, 3.0, 0.5),
+            glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+            Vec3::new(10.0, 2.0, -1.0),
+        );
+        let transformed = bounds.transformed(&matrix);
+
+        assert!(
+            transformed
+                .min
+                .abs_diff_eq(Vec3::new(-2.0, -2.0, -1.0), 1.0e-5)
+        );
+        assert!(
+            transformed
+                .max
+                .abs_diff_eq(Vec3::new(7.0, 4.0, 0.0), 1.0e-5)
+        );
+        assert_eq!(bounds.transformed(&Mat4::IDENTITY), bounds);
+    }
+
+    #[test]
+    fn transformed_bounds_a_sheared_flat_box() {
+        let bounds = Aabb {
+            min: Vec3::new(-2.0, -1.0, 0.0),
+            max: Vec3::new(1.0, 3.0, 0.0),
+        };
+        let matrix = Mat4 {
+            y_axis: glam::Vec4::new(2.0, 1.0, 0.0, 0.0),
+            ..Mat4::IDENTITY
+        };
+
+        assert_eq!(
+            bounds.transformed(&matrix),
+            Aabb {
+                min: Vec3::new(-4.0, -1.0, 0.0),
+                max: Vec3::new(7.0, 3.0, 0.0),
+            }
         );
     }
 }
