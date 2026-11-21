@@ -23,6 +23,12 @@ impl Aabb {
     pub fn extents(self) -> Vec3 {
         ((self.max.as_dvec3() - self.min.as_dvec3()) * 0.5).as_vec3()
     }
+
+    /// Returns whether the point lies inside or on the boundary.
+    #[must_use]
+    pub fn contains_point(self, point: Vec3) -> bool {
+        point.cmpge(self.min).all() && point.cmple(self.max).all()
+    }
 }
 
 #[cfg(test)]
@@ -69,5 +75,33 @@ mod tests {
         };
 
         assert_eq!(bounds.extents(), limit);
+    }
+
+    #[test]
+    fn contains_point_includes_boundaries_and_checks_every_axis() {
+        let bounds = Aabb {
+            min: Vec3::splat(-1.0),
+            max: Vec3::ONE,
+        };
+
+        for point in [Vec3::ZERO, Vec3::Y, bounds.min, bounds.max] {
+            assert!(bounds.contains_point(point));
+        }
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+            assert!(!bounds.contains_point(axis * 2.0));
+            assert!(!bounds.contains_point(axis * -2.0));
+        }
+    }
+
+    #[test]
+    fn contains_point_in_a_point_box_requires_exact_position() {
+        let point = Vec3::ONE;
+        let bounds = Aabb {
+            min: point,
+            max: point,
+        };
+
+        assert!(bounds.contains_point(point));
+        assert!(!bounds.contains_point(point + Vec3::Z));
     }
 }
