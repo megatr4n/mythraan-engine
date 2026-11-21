@@ -61,3 +61,38 @@ fn rejects_invalid_insertions_without_changing_the_tree() {
     );
     assert_eq!(tree, before);
 }
+
+#[test]
+fn removes_only_the_requested_duplicate_and_repairs_indices() {
+    let far = offset_box(20.0);
+    let mut tree = Bvh::build([(UNIT, 7), (far, 7), (offset_box(3.0), 2)]);
+    let id_for = |bounds| {
+        let index = tree.nodes().iter().position(|node| {
+            matches!(node, BvhNode::Leaf { bounds: leaf_bounds, .. } if *leaf_bounds == bounds)
+        }).unwrap();
+        tree.leaf_id(index).unwrap()
+    };
+    let first = id_for(UNIT);
+    let survivor = id_for(far);
+    let middle = id_for(offset_box(3.0));
+    assert_eq!(
+        tree.nodes()[tree.leaf_index(survivor).unwrap()].bounds(),
+        far
+    );
+
+    assert_eq!(tree.remove(first), Some((UNIT, 7)));
+    assert_eq!(tree.remove(first), None);
+    assert_eq!(tree.leaf_index(first), None);
+    assert!(tree.query_aabb(&UNIT).is_empty());
+    assert_eq!(tree.query_aabb(&far), vec![7]);
+    assert_eq!(tree.remove(middle), Some((offset_box(3.0), 2)));
+    assert_eq!(tree.leaf_index(survivor), tree.root_index());
+    assert_eq!(tree.remove(survivor), Some((far, 7)));
+    assert!(tree.nodes().is_empty());
+    assert_eq!(tree.root_index(), None);
+
+    let new_id = tree.insert(UNIT, 7).unwrap();
+    assert_ne!(new_id, first);
+    assert_ne!(new_id, survivor);
+    assert_eq!(tree.remove(first), None);
+}

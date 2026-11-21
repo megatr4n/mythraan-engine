@@ -140,5 +140,81 @@ fn area_growth(current: Aabb, addition: Aabb) -> f64 {
     area(current.merge(addition)) - area(current)
 }
 
+impl Bvh {
+    /// Removes the leaf and returns its bounds and payload, if present.
+    ///
+    /// Other leaf IDs stay valid. Node indices can change.
+    pub fn remove(&mut self, id: BvhLeafId) -> Option<(Aabb, u32)> {
+        let index = self.leaf_index(id)?;
+        let &BvhNode::Leaf { bounds, payload } = self.nodes.get(index)? else {
+            return None;
+        };
+        let index = self.detach_leaf(index)?;
+        self.leaf_indices.remove(&id);
+        self.remove_node(index);
+        Some((bounds, payload))
+    }
+
+    fn detach_leaf(&mut self, leaf: usize) -> Option<usize> {
+        let Some(parent) = self.links.get(leaf)?.parent else {
+            if self.root != Some(leaf) {
+                return None;
+            }
+            self.root = None;
+            return Some(leaf);
+        };
+        let &BvhNode::Branch { left, right, .. } = self.nodes.get(parent)? else {
+            return None;
+        };
+        let sibling = if left == leaf {
+            right
+        } else if right == leaf {
+            left
+        } else {
+            return None;
+        };
+        let grandparent = self.links.get(parent)?.parent;
+        let last = self.nodes.len().checked_sub(1)?;
+
+        self.replace_child(grandparent, parent, sibling);
+        self.set_parent(sibling, grandparent);
+        self.set_parent(leaf, None);
+        self.refit_ancestors(grandparent);
+        self.remove_node(parent);
+
+        Some(if leaf == last { parent } else { leaf })
+    }
+
+    fn remove_node(&mut self, index: usize) {
+        let Some(last) = self.nodes.len().checked_sub(1) else {
+            return;
+        };
+        if index > last {
+            return;
+        }
+
+        self.nodes.swap_remove(index);
+        self.links.swap_remove(index);
+        if index == last {
+            return;
+        }
+
+        // Repair references to the node moved out of the last slot.
+        let Some((&node, &link)) = self.nodes.get(index).zip(self.links.get(index)) else {
+            return;
+        };
+        if link.parent.is_some() || self.root == Some(last) {
+            self.replace_child(link.parent, last, index);
+        }
+        if let Some(id) = link.leaf {
+            self.leaf_indices.insert(id, index);
+        }
+        if let BvhNode::Branch { left, right, .. } = node {
+            self.set_parent(left, Some(index));
+            self.set_parent(right, Some(index));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
