@@ -1,4 +1,5 @@
 use super::{Bvh, BvhNode};
+use crate::aabb::Aabb;
 use crate::ray::Ray;
 
 impl Bvh {
@@ -48,12 +49,40 @@ impl Bvh {
 
         closest
     }
+
+    /// Returns one payload per leaf box overlapping or touching the query box.
+    ///
+    /// Payload IDs may repeat. Result order is unspecified.
+    #[must_use]
+    pub fn query_aabb(&self, query: &Aabb) -> Vec<u32> {
+        let mut payloads = Vec::new();
+        let Some(root) = self.root_index() else {
+            return payloads;
+        };
+        let mut pending = vec![root];
+
+        while let Some(index) = pending.pop() {
+            let Some(node) = self.nodes().get(index) else {
+                continue;
+            };
+            let bounds = node.bounds();
+            if !bounds.min.cmple(query.max).all() || !query.min.cmple(bounds.max).all() {
+                continue;
+            }
+
+            match *node {
+                BvhNode::Leaf { payload, .. } => payloads.push(payload),
+                BvhNode::Branch { left, right, .. } => pending.extend([right, left]),
+            }
+        }
+
+        payloads
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aabb::Aabb;
     use glam::Vec3;
 
     #[test]
@@ -95,5 +124,25 @@ mod tests {
             None
         );
         assert_eq!(Bvh::default().raycast(&ray), None);
+    }
+
+    #[test]
+    fn query_aabb_includes_face_contact_and_preserves_duplicate_payloads() {
+        let bounds = Aabb {
+            min: Vec3::ZERO,
+            max: Vec3::ONE,
+        };
+        let inside = Aabb {
+            min: Vec3::new(1.0, 0.5, 0.5),
+            max: Vec3::new(1.0, 0.5, 0.5),
+        };
+        let outside = Aabb {
+            min: Vec3::new(1.25, 0.0, 0.0),
+            max: Vec3::new(2.0, 1.0, 1.0),
+        };
+        let tree = Bvh::build([(outside, 1), (bounds, 7), (inside, 7)]);
+
+        assert_eq!(tree.query_aabb(&bounds), vec![7, 7]);
+        assert!(Bvh::default().query_aabb(&bounds).is_empty());
     }
 }
