@@ -249,6 +249,23 @@ mod tests {
             expected_boxes.sort_unstable();
             actual_boxes.sort_unstable();
             assert_eq!(actual_boxes, expected_boxes, "AABB case {case}");
+
+            let camera = samples.vector(-6.0, 6.0);
+            let view = Mat4::look_to_rh(camera, Vec3::NEG_Z, Vec3::Y);
+            let projection = if case % 2 == 0 {
+                Mat4::perspective_rh(std::f32::consts::FRAC_PI_3, 1.3, 0.5, 18.0)
+            } else {
+                Mat4::orthographic_rh(-3.0, 4.0, -4.0, 3.0, 0.5, 18.0)
+            };
+            let frustum = Frustum::from_view_projection(&(projection * view)).unwrap();
+            let mut expected_visible: Vec<_> = items
+                .iter()
+                .filter_map(|(bounds, id)| frustum.intersects_aabb(bounds).then_some(*id))
+                .collect();
+            let mut actual_visible = tree.query_frustum(&frustum);
+            expected_visible.sort_unstable();
+            actual_visible.sort_unstable();
+            assert_eq!(actual_visible, expected_visible, "frustum case {case}");
         }
     }
 }
