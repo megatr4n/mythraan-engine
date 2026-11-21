@@ -231,6 +231,24 @@ mod tests {
                 .filter_map(|(bounds, id)| ray.intersects_aabb(bounds).map(|t| (*id, t)))
                 .min_by(|(id_a, t_a), (id_b, t_b)| t_a.total_cmp(t_b).then_with(|| id_a.cmp(id_b)));
             assert_eq!(tree.raycast(&ray), expected_hit, "raycast case {case}");
+
+            let query = samples.bounds();
+            let mut expected_boxes: Vec<_> = items
+                .iter()
+                .filter_map(|(bounds, id)| {
+                    let overlaps = bounds.min.x <= query.max.x
+                        && query.min.x <= bounds.max.x
+                        && bounds.min.y <= query.max.y
+                        && query.min.y <= bounds.max.y
+                        && bounds.min.z <= query.max.z
+                        && query.min.z <= bounds.max.z;
+                    overlaps.then_some(*id)
+                })
+                .collect();
+            let mut actual_boxes = tree.query_aabb(&query);
+            expected_boxes.sort_unstable();
+            actual_boxes.sort_unstable();
+            assert_eq!(actual_boxes, expected_boxes, "AABB case {case}");
         }
     }
 }
