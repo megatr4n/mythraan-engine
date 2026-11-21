@@ -52,6 +52,27 @@ impl Transform {
     pub fn inverse(self) -> Option<GlobalTransform> {
         GlobalTransform::from(self).inverse()
     }
+
+    /// Points local `-Z` at `target` and aligns local `+Y` with the projected `up`.
+    ///
+    /// The target and up direction are in parent coordinates. Translation and scale
+    /// are preserved. Returns `None` if the inputs cannot define an orientation.
+    #[must_use]
+    pub fn looking_at(mut self, target: Vec3, up: Vec3) -> Option<Self> {
+        let forward = (target.as_dvec3() - self.translation.as_dvec3()).try_normalize()?;
+        let up = up.as_dvec3().try_normalize()?;
+        let right = forward.cross(up);
+        if right.length_squared() <= f64::EPSILON {
+            return None;
+        }
+
+        let right = right.normalize();
+        let back = -forward;
+        let corrected_up = back.cross(right);
+        let basis = Mat3::from_cols(right.as_vec3(), corrected_up.as_vec3(), back.as_vec3());
+        self.rotation = Quat::from_mat3(&basis).normalize();
+        Some(self)
+    }
 }
 
 impl Default for Transform {
@@ -272,5 +293,23 @@ mod tests {
                 .abs_diff_eq(expected, TOLERANCE)
         );
         assert_eq!(composed.try_to_transform(), None);
+    }
+
+    #[test]
+    fn looking_at_points_negative_z_at_the_target() {
+        let transform = Transform {
+            translation: Vec3::new(1.0, 2.0, 3.0),
+            scale: Vec3::new(2.0, 3.0, 4.0),
+            ..Transform::IDENTITY
+        };
+        let target = transform.translation + Vec3::X;
+        let oriented = transform.looking_at(target, Vec3::Y).unwrap();
+
+        assert!((oriented.rotation * Vec3::NEG_Z).abs_diff_eq(Vec3::X, TOLERANCE));
+        assert!((oriented.rotation * Vec3::Y).abs_diff_eq(Vec3::Y, TOLERANCE));
+        assert_eq!(oriented.translation, transform.translation);
+        assert_eq!(oriented.scale, transform.scale);
+        assert_eq!(transform.looking_at(transform.translation, Vec3::Y), None);
+        assert_eq!(transform.looking_at(target, Vec3::X), None);
     }
 }
