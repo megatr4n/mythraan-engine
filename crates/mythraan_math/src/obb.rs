@@ -2,6 +2,8 @@
 
 use glam::{DQuat, Quat, Vec3};
 
+use crate::ray::Ray;
+
 /// A box with three local half-extents and a rotation into world space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Obb {
@@ -58,6 +60,22 @@ impl Obb {
     }
 }
 
+impl Ray {
+    /// Returns the first forward hit parameter for an oriented box.
+    ///
+    /// Returns zero when the origin is inside or on the box.
+    #[must_use]
+    pub fn intersects_obb(self, bounds: &Obb) -> Option<f32> {
+        let (origin, direction) = self.finite_components()?;
+        let inverse = bounds.rotation.conjugate();
+        let origin = inverse * (origin - bounds.center.as_dvec3());
+        let direction = inverse * direction;
+        let half_extents = bounds.half_extents.as_dvec3();
+
+        Self::intersect_slabs(origin, direction, -half_extents, half_extents)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +105,36 @@ mod tests {
         assert_eq!(
             Obb::new(Vec3::ZERO, Vec3::ONE, Quat::from_xyzw(0.0, 0.0, 0.0, 0.0)),
             None
+        );
+    }
+
+    #[test]
+    fn ray_hits_rotated_box_without_rescaling_its_parameter() {
+        // This unit quaternion maps local X to world Y exactly.
+        let bounds = Obb::new(
+            Vec3::new(10.0, 2.0, 3.0),
+            Vec3::new(2.0, 0.5, 0.5),
+            Quat::from_xyzw(0.5, 0.5, 0.5, 0.5),
+        )
+        .unwrap();
+        let ray = Ray {
+            origin: bounds.center() - 6.0 * Vec3::Y,
+            direction: 2.0 * Vec3::Y,
+        };
+        let outside_parallel = Ray {
+            origin: ray.origin + Vec3::X,
+            ..ray
+        };
+
+        assert_eq!(ray.intersects_obb(&bounds), Some(2.0));
+        assert_eq!(outside_parallel.intersects_obb(&bounds), None);
+        assert_eq!(
+            Ray {
+                origin: bounds.center(),
+                ..ray
+            }
+            .intersects_obb(&bounds),
+            Some(0.0)
         );
     }
 }
