@@ -9,6 +9,7 @@ publish = false
 
 [workspace.dependencies]
 # every third-party and workspace crate version is declared here, once
+glam = "0.29.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
