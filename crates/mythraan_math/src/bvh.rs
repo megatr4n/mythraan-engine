@@ -1,4 +1,6 @@
-//! Static bounding volume hierarchies.
+//! Bounding volume hierarchies.
+
+use std::collections::BTreeMap;
 
 use glam::Vec3;
 
@@ -37,11 +39,22 @@ impl BvhNode {
     }
 }
 
-/// A static binary hierarchy over axis-aligned bounding boxes.
+/// The identity of a leaf within one BVH, independent of its node index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BvhLeafId(usize);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NodeLinks {
+    leaf: Option<BvhLeafId>,
+}
+
+/// A binary hierarchy over axis-aligned bounding boxes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Bvh {
     nodes: Vec<BvhNode>,
     root: Option<usize>,
+    links: Vec<NodeLinks>,
+    leaf_indices: BTreeMap<BvhLeafId, usize>,
 }
 
 impl Bvh {
@@ -62,7 +75,23 @@ impl Bvh {
             .collect();
         let mut nodes = Vec::with_capacity(items.len().saturating_mul(2).saturating_sub(1));
         let root = append_subtree(&mut items, &mut nodes).map(|(index, _)| index);
-        Self { nodes, root }
+        let mut links = vec![NodeLinks::default(); nodes.len()];
+        let mut leaf_indices = BTreeMap::new();
+        for (index, node) in nodes.iter().enumerate() {
+            if matches!(node, BvhNode::Leaf { .. }) {
+                let id = BvhLeafId(leaf_indices.len());
+                if let Some(link) = links.get_mut(index) {
+                    link.leaf = Some(id);
+                }
+                leaf_indices.insert(id, index);
+            }
+        }
+        Self {
+            nodes,
+            root,
+            links,
+            leaf_indices,
+        }
     }
 
     /// Returns the node slice addressed by the root and child indices.
@@ -75,6 +104,18 @@ impl Bvh {
     #[must_use]
     pub fn root_index(&self) -> Option<usize> {
         self.root
+    }
+
+    /// Returns the stable ID of the leaf at this node index.
+    #[must_use]
+    pub fn leaf_id(&self, node_index: usize) -> Option<BvhLeafId> {
+        self.links.get(node_index)?.leaf
+    }
+
+    /// Returns the leaf's current node index, or `None` if it is absent.
+    #[must_use]
+    pub fn leaf_index(&self, id: BvhLeafId) -> Option<usize> {
+        self.leaf_indices.get(&id).copied()
     }
 }
 
@@ -338,5 +379,26 @@ mod tests {
             payloads,
             items.into_iter().map(|(_, id)| id).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn assigns_distinct_leaf_ids_to_repeated_payloads() {
+        let bounds = Aabb {
+            min: Vec3::ZERO,
+            max: Vec3::ONE,
+        };
+        let tree = Bvh::build([(bounds, 7), (bounds, 7)]);
+        let root = tree.root_index().unwrap();
+        let BvhNode::Branch { left, right, .. } = tree.nodes()[root] else {
+            panic!("expected a branch");
+        };
+        let first = tree.leaf_id(left).unwrap();
+        let second = tree.leaf_id(right).unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(tree.leaf_index(first), Some(left));
+        assert_eq!(tree.leaf_index(second), Some(right));
+        assert_eq!(tree.leaf_id(root), None);
+        assert_eq!(tree.leaf_id(usize::MAX), None);
     }
 }

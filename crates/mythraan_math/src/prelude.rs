@@ -1,7 +1,7 @@
 //! Commonly used math types.
 
 pub use crate::aabb::Aabb;
-pub use crate::bvh::{Bvh, BvhNode};
+pub use crate::bvh::{Bvh, BvhLeafId, BvhNode};
 pub use crate::color::Color;
 pub use crate::frustum::Frustum;
 pub use crate::obb::Obb;
