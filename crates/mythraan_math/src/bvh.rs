@@ -302,4 +302,39 @@ mod tests {
             assert_eq!(nodes.len(), items.len() * 2 - 1);
         }
     }
+
+    #[test]
+    fn keeps_coincident_centroids_balanced_and_preserves_duplicate_ids() {
+        let point = Aabb {
+            min: Vec3::ONE,
+            max: Vec3::ONE,
+        };
+        let items: Vec<_> = (0..33).rev().map(|index| (point, index % 5)).collect();
+        let tree = Bvh::build(items.iter().copied());
+        assert_eq!(tree, Bvh::build(items.iter().copied()));
+
+        let mut leaf_counts = Vec::new();
+        let mut payloads = Vec::new();
+        for node in tree.nodes() {
+            let count = match *node {
+                BvhNode::Leaf { payload, .. } => {
+                    payloads.push(payload);
+                    1_usize
+                }
+                BvhNode::Branch { left, right, .. } => {
+                    let left_count: usize = leaf_counts[left];
+                    let right_count = leaf_counts[right];
+                    assert!(left_count.abs_diff(right_count) <= 1);
+                    left_count + right_count
+                }
+            };
+            leaf_counts.push(count);
+        }
+
+        assert_eq!(leaf_counts[tree.root_index().unwrap()], items.len());
+        assert_eq!(
+            payloads,
+            items.into_iter().map(|(_, id)| id).collect::<Vec<_>>()
+        );
+    }
 }
