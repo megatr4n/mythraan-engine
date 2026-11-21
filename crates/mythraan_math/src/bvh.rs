@@ -4,6 +4,8 @@ use glam::Vec3;
 
 use crate::aabb::Aabb;
 
+mod queries;
+
 /// A node in a bounding volume hierarchy.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BvhNode {
