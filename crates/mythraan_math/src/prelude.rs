@@ -1,6 +1,7 @@
 //! Commonly used math types.
 
 pub use crate::aabb::Aabb;
+pub use crate::color::Color;
 pub use crate::frustum::Frustum;
 pub use crate::obb::Obb;
 pub use crate::plane::Plane;
