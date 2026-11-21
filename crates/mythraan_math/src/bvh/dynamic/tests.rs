@@ -96,3 +96,42 @@ fn removes_only_the_requested_duplicate_and_repairs_indices() {
     assert_ne!(new_id, survivor);
     assert_eq!(tree.remove(first), None);
 }
+
+#[test]
+fn refits_small_moves_and_reinserts_large_moves_with_the_same_id() {
+    let far = offset_box(20.0);
+    let mut tree = Bvh::build([(UNIT, 7), (far, 9)]);
+    let id = tree.leaf_id(0).unwrap();
+    let old_parent = tree.links[0].parent;
+    let small_move = offset_box(2.0);
+
+    assert!(tree.update(id, small_move));
+    assert_eq!(tree.leaf_index(id), Some(0));
+    assert_eq!(tree.links[0].parent, old_parent);
+    assert_eq!(
+        tree.nodes()[tree.root_index().unwrap()].bounds(),
+        small_move.merge(far)
+    );
+    assert!(tree.query_aabb(&UNIT).is_empty());
+
+    let large_move = offset_box(200.0);
+    assert!(tree.update(id, large_move));
+    assert!(tree.query_aabb(&small_move).is_empty());
+    assert_eq!(tree.query_aabb(&large_move), vec![7]);
+    assert_eq!(
+        tree.nodes()[tree.root_index().unwrap()].bounds(),
+        far.merge(large_move)
+    );
+
+    let before = tree.clone();
+    assert!(!tree.update(
+        id,
+        Aabb {
+            max: Vec3::NAN,
+            ..UNIT
+        }
+    ));
+    assert_eq!(tree, before);
+    assert_eq!(tree.remove(id), Some((large_move, 7)));
+    assert!(!tree.update(id, UNIT));
+}

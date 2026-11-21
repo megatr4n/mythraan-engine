@@ -216,5 +216,47 @@ impl Bvh {
     }
 }
 
+impl Bvh {
+    /// Changes a leaf's bounds while preserving its ID.
+    ///
+    /// Refits its ancestors when the new box fits the parent. Otherwise the
+    /// leaf is reinserted. Returns false for an absent ID or invalid bounds.
+    pub fn update(&mut self, id: BvhLeafId, bounds: Aabb) -> bool {
+        let Some(index) = self.leaf_index(id).filter(|_| valid_bounds(bounds)) else {
+            return false;
+        };
+        let Some(link) = self.links.get(index) else {
+            return false;
+        };
+        let parent = link.parent;
+        let fits_parent = parent
+            .and_then(|index| self.nodes.get(index))
+            .is_none_or(|node| {
+                let outer = node.bounds();
+                outer.contains_point(bounds.min) && outer.contains_point(bounds.max)
+            });
+        let index = if fits_parent {
+            index
+        } else if let Some(index) = self.detach_leaf(index) {
+            index
+        } else {
+            return false;
+        };
+
+        if let Some(BvhNode::Leaf {
+            bounds: current, ..
+        }) = self.nodes.get_mut(index)
+        {
+            *current = bounds;
+        }
+        if fits_parent {
+            self.refit_ancestors(parent);
+        } else {
+            self.attach_leaf(index, bounds);
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests;
