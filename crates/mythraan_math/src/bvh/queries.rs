@@ -183,4 +183,54 @@ mod tests {
         assert_eq!(hits, vec![2, 5]);
         assert!(Bvh::default().query_frustum(&frustum).is_empty());
     }
+
+    struct Samples(u64);
+
+    impl Samples {
+        fn scalar(&mut self, min: f32, max: f32) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let fraction = (self.0 >> 40) as f32 / 16_777_216.0;
+            min + (max - min) * fraction
+        }
+
+        fn vector(&mut self, min: f32, max: f32) -> Vec3 {
+            Vec3::new(
+                self.scalar(min, max),
+                self.scalar(min, max),
+                self.scalar(min, max),
+            )
+        }
+
+        fn bounds(&mut self) -> Aabb {
+            let min = self.vector(-8.0, 8.0);
+            let max = min + self.vector(0.0, 3.0);
+            Aabb { min, max }
+        }
+    }
+
+    #[test]
+    fn matches_brute_force_on_a_thousand_seeded_cases() {
+        let mut samples = Samples(0x042a_1c3d_8574_30e9);
+        for case in 0..1_000 {
+            let items: Vec<_> = (0..case % 49)
+                .map(|index| (samples.bounds(), index % 13))
+                .collect();
+            let tree = Bvh::build(items.iter().copied());
+            let origin = samples.vector(-8.0, 8.0);
+            let direction = match (case % 4, items.first()) {
+                (0, Some((bounds, _))) => bounds.center() - origin,
+                (1, _) => Vec3::Z,
+                _ => samples.vector(-2.0, 2.0),
+            };
+            let ray = Ray { origin, direction };
+            let expected_hit = items
+                .iter()
+                .filter_map(|(bounds, id)| ray.intersects_aabb(bounds).map(|t| (*id, t)))
+                .min_by(|(id_a, t_a), (id_b, t_b)| t_a.total_cmp(t_b).then_with(|| id_a.cmp(id_b)));
+            assert_eq!(tree.raycast(&ray), expected_hit, "raycast case {case}");
+        }
+    }
 }
