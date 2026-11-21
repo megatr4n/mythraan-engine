@@ -2,6 +2,8 @@
 
 use glam::{DVec3, DVec4, Vec3};
 
+use crate::ray::Ray;
+
 /// A plane with a unit normal, defined by `normal.dot(point) + offset = 0`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plane {
@@ -62,6 +64,27 @@ impl Plane {
     }
 }
 
+impl Ray {
+    /// Returns the first forward hit parameter for a plane.
+    ///
+    /// Returns zero when the origin lies on the plane, including coplanar rays.
+    #[must_use]
+    pub fn intersects_plane(self, plane: &Plane) -> Option<f32> {
+        let (origin, direction) = self.finite_components()?;
+        let distance = plane.signed_distance_f64(origin);
+        if distance == 0.0 {
+            return Some(0.0);
+        }
+
+        let rate = plane.normal.dot(direction);
+        if rate == 0.0 {
+            return None;
+        }
+
+        Self::forward_hit(-distance / rate)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +106,40 @@ mod tests {
         assert_eq!(Plane::from_point_normal(Vec3::ZERO, Vec3::ZERO), None);
         assert_eq!(Plane::from_point_normal(Vec3::ZERO, Vec3::NAN), None);
         assert_eq!(Plane::from_point_normal(Vec3::NAN, Vec3::Y), None);
+    }
+
+    #[test]
+    fn plane_hits_work_from_both_sides_at_non_unit_speed() {
+        let plane = Plane::from_point_normal(Vec3::Y, Vec3::Y).unwrap();
+        for (origin, direction) in [
+            (Vec3::Y * 5.0, -Vec3::Y * 2.0),
+            (-Vec3::Y * 3.0, Vec3::Y * 2.0),
+        ] {
+            assert_eq!(
+                Ray { origin, direction }.intersects_plane(&plane),
+                Some(2.0)
+            );
+        }
+    }
+
+    #[test]
+    fn plane_handles_coplanar_parallel_and_backward_rays() {
+        let plane = Plane::from_point_normal(Vec3::Y, Vec3::Y).unwrap();
+        let coplanar = Ray {
+            origin: Vec3::Y,
+            direction: Vec3::X,
+        };
+        let parallel = Ray {
+            origin: Vec3::ZERO,
+            ..coplanar
+        };
+        let backward = Ray {
+            direction: -Vec3::Y,
+            ..parallel
+        };
+
+        assert_eq!(coplanar.intersects_plane(&plane), Some(0.0));
+        assert_eq!(parallel.intersects_plane(&plane), None);
+        assert_eq!(backward.intersects_plane(&plane), None);
     }
 }
