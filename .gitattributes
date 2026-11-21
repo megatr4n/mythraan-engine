@@ -1,0 +1,33 @@
+[attr]lfs filter=lfs diff=lfs merge=lfs -text
+
+# Add individual large .gltf assets to LFS when they are introduced.
+/game/**/*.glb lfs
+/game/**/*.png lfs
+/game/**/*.jpg lfs
+/game/**/*.hdr lfs
+/game/**/*.ktx2 lfs
+/game/**/*.ogg lfs
+/game/**/*.wav lfs
+/game/**/*.flac lfs
+/game/**/*.ttf lfs
+/game/**/*.otf lfs
+/samples/**/*.glb lfs
+/samples/**/*.png lfs
+/samples/**/*.jpg lfs
+/samples/**/*.hdr lfs
+/samples/**/*.ktx2 lfs
+/samples/**/*.ogg lfs
+/samples/**/*.wav lfs
+/samples/**/*.flac lfs
+/samples/**/*.ttf lfs
+/samples/**/*.otf lfs
+/tests/*/references/**/*.glb lfs
+/tests/*/references/**/*.png lfs
+/tests/*/references/**/*.jpg lfs
+/tests/*/references/**/*.hdr lfs
+/tests/*/references/**/*.ktx2 lfs
+/tests/*/references/**/*.ogg lfs
+/tests/*/references/**/*.wav lfs
+/tests/*/references/**/*.flac lfs
+/tests/*/references/**/*.ttf lfs
+/tests/*/references/**/*.otf lfs

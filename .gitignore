@@ -1,0 +1,6 @@
+/target/
+/game/cooked/
+*.mpak
+.DS_Store
+*.profraw
+/tests/mythraan_golden/diff/
