@@ -65,9 +65,17 @@ mod tests {
     use super::*;
     use std::f32::consts::FRAC_PI_2;
 
+    const CAMERA: Vec3 = Vec3::new(10.0, 2.0, 3.0);
+
     fn perspective() -> Frustum {
         let projection = Mat4::perspective_rh(FRAC_PI_2, 1.0, 1.0, 9.0);
         Frustum::from_view_projection(&projection).unwrap()
+    }
+
+    fn orthographic() -> Frustum {
+        let projection = Mat4::orthographic_rh(-2.0, 2.0, -2.0, 2.0, 1.0, 9.0);
+        let view = Mat4::look_to_rh(CAMERA, Vec3::X, Vec3::Y);
+        Frustum::from_view_projection(&(projection * view)).unwrap()
     }
 
     #[test]
@@ -116,6 +124,35 @@ mod tests {
         };
 
         assert!(frustum.intersects_aabb(&crossing));
+        assert!(!frustum.intersects_aabb(&outside));
+    }
+
+    #[test]
+    fn orthographic_points_follow_the_translated_and_rotated_camera() {
+        let frustum = orthographic();
+        let point_on_side = Vec3::new(4.0, 0.0, -2.0);
+
+        assert!(frustum.contains_point(CAMERA + Vec3::X));
+        assert!(frustum.contains_point(CAMERA + Vec3::X * 9.0));
+        assert!(frustum.contains_point(CAMERA + point_on_side));
+        assert!(!frustum.contains_point(CAMERA + point_on_side - Vec3::Z * 0.25));
+        assert!(!frustum.contains_point(CAMERA));
+        assert!(!frustum.contains_point(CAMERA + Vec3::X * 10.0));
+    }
+
+    #[test]
+    fn orthographic_keeps_boxes_touching_the_near_plane() {
+        let frustum = orthographic();
+        let touching = Aabb {
+            min: CAMERA + Vec3::new(0.0, -0.25, -0.25),
+            max: CAMERA + Vec3::new(1.0, 0.25, 0.25),
+        };
+        let outside = Aabb {
+            max: touching.max - Vec3::X * 0.25,
+            ..touching
+        };
+
+        assert!(frustum.intersects_aabb(&touching));
         assert!(!frustum.intersects_aabb(&outside));
     }
 }
