@@ -155,4 +155,10 @@ mod tests {
         assert!(frustum.intersects_aabb(&touching));
         assert!(!frustum.intersects_aabb(&outside));
     }
+
+    #[test]
+    fn rejects_invalid_view_projection_matrices() {
+        assert_eq!(Frustum::from_view_projection(&Mat4::ZERO), None);
+        assert_eq!(Frustum::from_view_projection(&Mat4::NAN), None);
+    }
 }
