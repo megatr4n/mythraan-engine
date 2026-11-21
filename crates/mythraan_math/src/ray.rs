@@ -132,4 +132,43 @@ mod tests {
 
         assert_eq!(ray.intersects_aabb(&point), Some(1.0));
     }
+
+    #[test]
+    fn handles_extreme_finite_coordinates_and_directions() {
+        let point = Aabb {
+            min: Vec3::X * f32::MAX,
+            max: Vec3::X * f32::MAX,
+        };
+        let ray = Ray {
+            origin: -Vec3::X * f32::MAX,
+            direction: Vec3::X * f32::MAX,
+        };
+
+        assert_eq!(ray.intersects_aabb(&point), Some(2.0));
+
+        let mut tiny = Ray {
+            origin: Vec3::new(-1.0e-40, 0.5, 0.5),
+            direction: Vec3::X * 1.0e-40,
+        };
+        assert_eq!(tiny.intersects_aabb(&BOX), Some(1.0));
+
+        tiny.origin.x = -1.0;
+        assert_eq!(tiny.intersects_aabb(&BOX), None);
+    }
+
+    #[test]
+    fn rejects_invalid_rays() {
+        for direction in [Vec3::ZERO, Vec3::NAN, Vec3::splat(f32::INFINITY)] {
+            let ray = Ray {
+                origin: Vec3::splat(0.5),
+                direction,
+            };
+            assert_eq!(ray.intersects_aabb(&BOX), None);
+        }
+        let ray = Ray {
+            origin: Vec3::NAN,
+            direction: Vec3::X,
+        };
+        assert_eq!(ray.intersects_aabb(&BOX), None);
+    }
 }
