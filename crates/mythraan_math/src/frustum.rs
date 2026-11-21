@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn perspective_contains_visible_points() {
+    fn perspective_clips_points_against_each_plane() {
         let frustum = perspective();
 
         for point in [
@@ -89,6 +89,17 @@ mod tests {
             Vec3::new(0.0, 0.0, -9.0),
         ] {
             assert!(frustum.contains_point(point), "{point:?}");
+        }
+        for point in [
+            Vec3::new(-5.0, 0.0, -4.0),
+            Vec3::new(5.0, 0.0, -4.0),
+            Vec3::new(0.0, -5.0, -4.0),
+            Vec3::new(0.0, 5.0, -4.0),
+            Vec3::new(0.0, 0.0, -0.75),
+            Vec3::new(0.0, 0.0, -10.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ] {
+            assert!(!frustum.contains_point(point), "{point:?}");
         }
     }
 
