@@ -1,6 +1,8 @@
 //! View frusta and volume tests.
 
-use glam::{DVec4, Mat4, Vec3};
+use glam::{DVec3, DVec4, Mat4, Vec3};
+
+use crate::aabb::Aabb;
 
 /// A view volume bounded by six inward-facing planes with unit normals.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +43,21 @@ impl Frustum {
         let point = point.as_dvec3().extend(1.0);
         self.planes.iter().all(|plane| plane.dot(point) >= 0.0)
     }
+
+    /// Returns false when any frustum plane excludes the entire world-space box.
+    ///
+    /// A true result includes boundary contact and can include disjoint boxes
+    /// near frustum edges.
+    #[must_use]
+    pub fn intersects_aabb(&self, bounds: &Aabb) -> bool {
+        let min = bounds.min.as_dvec3();
+        let max = bounds.max.as_dvec3();
+        self.planes.iter().all(|plane| {
+            let normal = plane.truncate();
+            let furthest = DVec3::select(normal.cmpge(DVec3::ZERO), max, min);
+            plane.dot(furthest.extend(1.0)) >= 0.0
+        })
+    }
 }
 
 #[cfg(test)]
@@ -73,5 +90,21 @@ mod tests {
         ] {
             assert!(frustum.contains_point(point), "{point:?}");
         }
+    }
+
+    #[test]
+    fn perspective_keeps_a_box_crossing_a_side_plane() {
+        let frustum = perspective();
+        let crossing = Aabb {
+            min: Vec3::new(3.75, -0.5, -4.25),
+            max: Vec3::new(5.0, 0.5, -3.75),
+        };
+        let outside = Aabb {
+            min: Vec3::new(3.75, -0.5, -2.25),
+            max: Vec3::new(5.0, 0.5, -1.75),
+        };
+
+        assert!(frustum.intersects_aabb(&crossing));
+        assert!(!frustum.intersects_aabb(&outside));
     }
 }
