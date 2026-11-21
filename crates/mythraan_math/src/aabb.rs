@@ -278,4 +278,27 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn transformed_avoids_overflow_when_large_terms_cancel() {
+        let point = Vec3::new(f32::MAX, f32::MAX, 0.0);
+        let bounds = Aabb {
+            min: point,
+            max: point,
+        };
+        let matrix = Mat4 {
+            x_axis: glam::Vec4::new(2.0, 0.0, 0.0, 0.0),
+            y_axis: glam::Vec4::new(-2.0, 1.0, 0.0, 0.0),
+            ..Mat4::IDENTITY
+        };
+        let expected = Vec3::new(0.0, f32::MAX, 0.0);
+
+        assert_eq!(
+            bounds.transformed(&matrix),
+            Aabb {
+                min: expected,
+                max: expected
+            }
+        );
+    }
 }
