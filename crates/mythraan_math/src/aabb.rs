@@ -17,6 +17,12 @@ impl Aabb {
     pub fn center(self) -> Vec3 {
         ((self.min.as_dvec3() + self.max.as_dvec3()) * 0.5).as_vec3()
     }
+
+    /// Returns half the width, height, and depth.
+    #[must_use]
+    pub fn extents(self) -> Vec3 {
+        ((self.max.as_dvec3() - self.min.as_dvec3()) * 0.5).as_vec3()
+    }
 }
 
 #[cfg(test)]
@@ -42,5 +48,26 @@ mod tests {
         };
 
         assert_eq!(bounds.center(), point);
+    }
+
+    #[test]
+    fn extents_are_half_sizes_with_zero_for_a_flat_axis() {
+        let bounds = Aabb {
+            min: Vec3::new(-4.0, 2.0, -6.0),
+            max: Vec3::new(2.0, 2.0, 8.0),
+        };
+
+        assert_eq!(bounds.extents(), Vec3::new(3.0, 0.0, 7.0));
+    }
+
+    #[test]
+    fn extents_are_finite_across_the_f32_range() {
+        let limit = Vec3::splat(f32::MAX);
+        let bounds = Aabb {
+            min: -limit,
+            max: limit,
+        };
+
+        assert_eq!(bounds.extents(), limit);
     }
 }
