@@ -250,4 +250,56 @@ mod tests {
             assert_eq!(tree.nodes()[right].bounds(), items[0].0.merge(items[2].0));
         }
     }
+
+    #[test]
+    fn reaches_every_leaf_and_encloses_its_bounds() {
+        for count in [2_u32, 3, 17, 64, 127] {
+            let items: Vec<_> = (0..count)
+                .map(|id| {
+                    let min = Vec3::new(
+                        f32::from(((id * 37) % 43) as u8),
+                        f32::from(((id * 11) % 31) as u8),
+                        f32::from(((id * 23) % 19) as u8),
+                    );
+                    let max = min + Vec3::new(0.0, 0.5, 1.0);
+                    (Aabb { min, max }, id)
+                })
+                .collect();
+            let tree = Bvh::build(items.iter().copied());
+            let nodes = tree.nodes();
+            let mut seen = vec![false; nodes.len()];
+            let mut pending = vec![tree.root_index().unwrap()];
+            let mut payloads = Vec::new();
+
+            while let Some(index) = pending.pop() {
+                assert!(
+                    !std::mem::replace(&mut seen[index], true),
+                    "node visited twice"
+                );
+                match nodes[index] {
+                    BvhNode::Leaf { bounds, payload } => {
+                        assert_eq!(bounds, items[payload as usize].0);
+                        payloads.push(payload);
+                    }
+                    BvhNode::Branch {
+                        bounds,
+                        left,
+                        right,
+                    } => {
+                        for child in [left, right] {
+                            let child_bounds = nodes[child].bounds();
+                            assert!(bounds.contains_point(child_bounds.min));
+                            assert!(bounds.contains_point(child_bounds.max));
+                            pending.push(child);
+                        }
+                    }
+                }
+            }
+
+            assert!(seen.into_iter().all(|reached| reached));
+            payloads.sort_unstable();
+            assert_eq!(payloads, (0..count).collect::<Vec<_>>());
+            assert_eq!(nodes.len(), items.len() * 2 - 1);
+        }
+    }
 }
