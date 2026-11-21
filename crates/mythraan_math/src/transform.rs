@@ -26,6 +26,32 @@ impl Transform {
     pub fn to_matrix(self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
+
+    /// Applies `child` first, then this transform, preserving any resulting shear.
+    ///
+    /// ```
+    /// use mythraan_math::{glam::Vec3, prelude::Transform};
+    ///
+    /// let parent = Transform {
+    ///     scale: Vec3::splat(2.0),
+    ///     ..Transform::IDENTITY
+    /// };
+    /// let child = Transform {
+    ///     translation: Vec3::X,
+    ///     ..Transform::IDENTITY
+    /// };
+    /// assert_eq!(parent.compose(child).0.transform_point3(Vec3::ZERO), Vec3::X * 2.0);
+    /// ```
+    #[must_use]
+    pub fn compose(self, child: Self) -> GlobalTransform {
+        GlobalTransform::from(self).compose(child.into())
+    }
+
+    /// Returns the inverse matrix, or `None` if no finite inverse can be represented.
+    #[must_use]
+    pub fn inverse(self) -> Option<GlobalTransform> {
+        GlobalTransform::from(self).inverse()
+    }
 }
 
 impl Default for Transform {
@@ -41,6 +67,26 @@ pub struct GlobalTransform(pub Mat4);
 impl GlobalTransform {
     /// Leaves points and directions unchanged.
     pub const IDENTITY: Self = Self(Mat4::IDENTITY);
+
+    /// Applies `child` first, then this transform.
+    #[must_use]
+    pub fn compose(self, child: Self) -> Self {
+        Self(self.0 * child.0)
+    }
+
+    /// Returns the inverse matrix, or `None` if no finite inverse can be represented.
+    #[must_use]
+    pub fn inverse(self) -> Option<Self> {
+        // A determinant in f32 can underflow or overflow even for invertible scales.
+        let matrix = self.0.as_dmat4();
+        let determinant = matrix.determinant();
+        if determinant == 0.0 || !determinant.is_finite() {
+            return None;
+        }
+
+        let inverse = matrix.inverse().as_mat4();
+        inverse.is_finite().then_some(Self(inverse))
+    }
 
     /// Decomposes the matrix into scale, rotation, and translation.
     ///
@@ -110,11 +156,84 @@ mod tests {
 
     #[test]
     fn identity_preserves_transforms() {
+        let transform = Transform {
+            translation: Vec3::ONE,
+            ..Transform::IDENTITY
+        };
+        let global = GlobalTransform::from(transform);
+
         assert_eq!(Transform::default().to_matrix(), Mat4::IDENTITY);
         assert_eq!(
             GlobalTransform::default().try_to_transform(),
             Some(Transform::IDENTITY)
         );
+        assert_eq!(Transform::IDENTITY.compose(transform), global);
+        assert_eq!(global.compose(GlobalTransform::IDENTITY), global);
+    }
+
+    #[test]
+    fn composition_applies_child_before_parent() {
+        let parent = Transform {
+            translation: Vec3::new(4.0, 5.0, 6.0),
+            rotation: Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+            scale: Vec3::new(2.0, 3.0, 4.0),
+        };
+        let child = Transform {
+            translation: Vec3::X,
+            ..Transform::IDENTITY
+        };
+
+        let child_origin = parent.compose(child).0.transform_point3(Vec3::ZERO);
+        assert!(child_origin.abs_diff_eq(Vec3::new(4.0, 7.0, 6.0), TOLERANCE));
+    }
+
+    #[test]
+    fn inverse_round_trip_with_rotation_and_nonuniform_scale() {
+        let transform = Transform {
+            translation: Vec3::new(-4.0, 2.0, 8.0),
+            rotation: Quat::from_rotation_y(0.8),
+            scale: Vec3::new(2.0, 3.0, 0.5),
+        };
+        let global = GlobalTransform::from(transform);
+        let inverse = transform.inverse().unwrap();
+        let point = Vec3::new(1.0, -2.0, 3.0);
+
+        assert!(
+            inverse
+                .0
+                .transform_point3(global.0.transform_point3(point))
+                .abs_diff_eq(point, TOLERANCE)
+        );
+        assert!(
+            global
+                .compose(inverse)
+                .0
+                .abs_diff_eq(Mat4::IDENTITY, TOLERANCE)
+        );
+    }
+
+    #[test]
+    fn inverse_handles_finite_extreme_scales_and_rejects_zero_scale() {
+        let singular = Transform {
+            scale: Vec3::new(1.0, 0.0, 1.0),
+            ..Transform::IDENTITY
+        };
+        assert_eq!(singular.inverse(), None);
+
+        for scale in [1.0e-20, 1.0e20] {
+            let transform = Transform {
+                scale: Vec3::splat(scale),
+                ..Transform::IDENTITY
+            };
+            let global = GlobalTransform::from(transform);
+            let inverse = global.inverse().unwrap();
+            assert!(
+                inverse
+                    .compose(global)
+                    .0
+                    .abs_diff_eq(Mat4::IDENTITY, TOLERANCE)
+            );
+        }
     }
 
     #[test]
@@ -128,5 +247,30 @@ mod tests {
         let decomposed = global.try_to_transform().unwrap();
 
         assert!(decomposed.to_matrix().abs_diff_eq(global.0, TOLERANCE));
+    }
+
+    #[test]
+    fn composition_preserves_shear_that_local_transforms_cannot_store() {
+        let parent = Transform {
+            scale: Vec3::new(2.0, 3.0, 1.0),
+            ..Transform::IDENTITY
+        };
+        let child = Transform {
+            rotation: Quat::from_rotation_z(0.6),
+            ..Transform::IDENTITY
+        };
+        let point = Vec3::new(1.0, 2.0, 3.0);
+        let expected = parent
+            .to_matrix()
+            .transform_point3(child.to_matrix().transform_point3(point));
+        let composed = parent.compose(child);
+
+        assert!(
+            composed
+                .0
+                .transform_point3(point)
+                .abs_diff_eq(expected, TOLERANCE)
+        );
+        assert_eq!(composed.try_to_transform(), None);
     }
 }
