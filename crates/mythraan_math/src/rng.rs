@@ -51,6 +51,18 @@ impl Rng {
     pub fn next_f32(&mut self) -> f32 {
         (self.next_u32() >> 8) as f32 * (1.0 / 16_777_216.0)
     }
+
+    /// Samples from `start..end`, returning `None` for non-finite or unordered endpoints.
+    pub fn range_f32(&mut self, range: Range<f32>) -> Option<f32> {
+        if !range.start.is_finite() || !range.end.is_finite() || range.start >= range.end {
+            return None;
+        }
+
+        let lower = f64::from(range.start);
+        let span = f64::from(range.end) - lower;
+        let sample = f64::from(self.next_f32()).mul_add(span, lower) as f32;
+        Some(sample.min(range.end.next_down()))
+    }
 }
 
 #[cfg(test)]
@@ -135,5 +147,37 @@ mod tests {
         for _ in 0..1_000 {
             assert!((0.0..1.0).contains(&rng.next_f32()));
         }
+    }
+
+    #[test]
+    fn float_ranges_repeat_and_keep_the_upper_endpoint_exclusive() {
+        let mut rng = Rng::from_seed(0);
+        let expected = [0x4053_30fc, 0x3f16_d3b4, 0xbfeb_b2e9, 0x4074_d194];
+        assert_eq!(
+            expected.map(|_| rng.range_f32(-2.0..4.0).unwrap().to_bits()),
+            expected
+        );
+
+        let upper = 1.0_f32;
+        let lower = upper.next_down();
+        for _ in 0..128 {
+            assert_eq!(rng.range_f32(lower..upper), Some(lower));
+            assert!((f32::MIN..f32::MAX).contains(&rng.range_f32(f32::MIN..f32::MAX).unwrap()));
+        }
+    }
+
+    #[test]
+    fn invalid_float_ranges_leave_the_stream_unchanged() {
+        let mut rng = Rng::from_seed(20);
+        let mut replay = rng.clone();
+        for (start, end) in [
+            (0.0, 0.0),
+            (2.0, 1.0),
+            (f32::NAN, 1.0),
+            (0.0, f32::INFINITY),
+        ] {
+            assert_eq!(rng.range_f32(start..end), None);
+        }
+        assert_eq!(rng.next_u64(), replay.next_u64());
     }
 }
