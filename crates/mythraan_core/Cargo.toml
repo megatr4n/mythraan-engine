@@ -23,4 +23,9 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 serde_test.workspace = true
+
+[[bench]]
+name = "arena"
+harness = false

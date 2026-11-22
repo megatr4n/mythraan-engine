@@ -462,6 +462,7 @@ name = "mythraan_core"
 version = "0.1.0"
 dependencies = [
  "cap-std",
+ "criterion",
  "notify",
  "puffin",
  "ron",
