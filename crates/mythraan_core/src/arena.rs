@@ -160,4 +160,24 @@ mod tests {
         assert_eq!(arena.get(b).map(String::as_str), Some("b"));
         assert_eq!(arena.len(), 2);
     }
+
+    #[test]
+    fn retires_a_slot_after_its_last_generation() {
+        let mut arena = Arena::new();
+        let first = arena.insert(1);
+        arena.slots[first.index()].generation = u64::MAX - 1;
+        let penultimate = Handle::new(first.index(), u64::MAX - 1);
+        assert_eq!(arena.remove(penultimate), Some(1));
+
+        let last = arena.insert(2);
+        assert_eq!(last.index(), first.index());
+        assert_eq!(last.generation(), u64::MAX);
+        assert_eq!(arena.remove(last), Some(2));
+
+        let next = arena.insert(3);
+        assert_ne!(next.index(), last.index());
+        assert!(arena.get(first).is_none());
+        assert!(arena.get(last).is_none());
+        assert_eq!(arena.get(next), Some(&3));
+    }
 }
