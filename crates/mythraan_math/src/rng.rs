@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+use glam::Vec3;
+
 /// A reproducible SplitMix64 generator for simulations and procedural content.
 ///
 /// The same seed and sequence of calls reproduce the same output.
@@ -62,6 +64,24 @@ impl Rng {
         let span = f64::from(range.end) - lower;
         let sample = f64::from(self.next_f32()).mul_add(span, lower) as f32;
         Some(sample.min(range.end.next_down()))
+    }
+
+    /// Samples a direction uniformly on the unit sphere to floating-point precision.
+    pub fn unit_vec3(&mut self) -> Vec3 {
+        loop {
+            let x = 2.0 * f64::from(self.next_f32()) - 1.0;
+            let y = 2.0 * f64::from(self.next_f32()) - 1.0;
+            let radius_squared = x * x + y * y;
+            if radius_squared < 1.0 {
+                // Marsaglia's area-preserving map from the disk to the sphere.
+                let scale = 2.0 * (1.0 - radius_squared).sqrt();
+                return Vec3::new(
+                    (x * scale) as f32,
+                    (y * scale) as f32,
+                    (1.0 - 2.0 * radius_squared) as f32,
+                );
+            }
+        }
     }
 }
 
@@ -179,5 +199,32 @@ mod tests {
             assert_eq!(rng.range_f32(start..end), None);
         }
         assert_eq!(rng.next_u64(), replay.next_u64());
+    }
+
+    #[test]
+    fn unit_vectors_have_a_fixed_sequence() {
+        let mut rng = Rng::from_seed(0);
+        let expected = [
+            [0x3f76_3b58, 0xbe2f_f0d1, 0xbe5a_08ed],
+            [0xbf4d_e3fd, 0xbeb4_a03d, 0xbef4_db2e],
+            [0xbf30_96b9, 0x3f13_0859, 0xbee1_b03f],
+            [0xbeaf_6f11, 0x3f5d_28e8, 0x3ebc_ff92],
+        ];
+        assert_eq!(
+            expected.map(|_| rng.unit_vec3().to_array().map(f32::to_bits)),
+            expected
+        );
+    }
+
+    #[test]
+    fn directions_are_normalized_and_cover_both_hemispheres() {
+        let mut rng = Rng::from_seed(492);
+        let mut sum = Vec3::ZERO;
+        for _ in 0..4_096 {
+            let direction = rng.unit_vec3();
+            assert!((direction.length_squared() - 1.0).abs() < 1.0e-6);
+            sum += direction;
+        }
+        assert!((sum / 4_096.0).abs().max_element() < 0.035);
     }
 }
