@@ -10,6 +10,7 @@ publish = false
 [workspace.dependencies]
 # every third-party and workspace crate version is declared here, once
 glam = "0.29.3"
+puffin = { version = "0.20.0", default-features = false }
 serde = "1.0.228"
 serde_test = "1.0.177"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }

@@ -8,7 +8,11 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+profiling = ["dep:puffin"]
+
 [dependencies]
+puffin = { workspace = true, optional = true }
 serde.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
