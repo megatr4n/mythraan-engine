@@ -12,6 +12,7 @@ publish.workspace = true
 profiling = ["dep:puffin"]
 
 [dependencies]
+cap-std.workspace = true
 puffin = { workspace = true, optional = true }
 ron.workspace = true
 serde.workspace = true

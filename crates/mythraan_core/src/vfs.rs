@@ -1,8 +1,9 @@
 //! Read-only access to files through virtual paths.
 
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use cap_std::{ambient_authority, fs::Dir};
 
 /// Reads files from a source such as a directory or an asset archive.
 pub trait Vfs: Send + Sync {
@@ -14,13 +15,12 @@ pub trait Vfs: Send + Sync {
     fn read(&self, path: &str) -> io::Result<Vec<u8>>;
 }
 
-/// A virtual filesystem rooted at a host-controlled directory.
+/// A virtual filesystem backed by an open root directory.
 ///
-/// Reads resolve symbolic links and check that the resolved path stays inside
-/// the root. The host must keep the directory and its links under its control
-/// while reads are in progress.
+/// Relative symbolic links may resolve within the root. Absolute links and
+/// links that lead outside the root are rejected.
 pub struct DirVfs {
-    root: PathBuf,
+    root: Dir,
 }
 
 impl DirVfs {
@@ -30,13 +30,7 @@ impl DirVfs {
     ///
     /// Returns an error if the root does not exist or is not a directory.
     pub fn new(root: impl AsRef<Path>) -> io::Result<Self> {
-        let root = root.as_ref().canonicalize()?;
-        if !root.metadata()?.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotADirectory,
-                "VFS root is not a directory",
-            ));
-        }
+        let root = Dir::open_ambient_dir(root, ambient_authority())?;
         Ok(Self { root })
     }
 }
@@ -50,20 +44,13 @@ impl Vfs for DirVfs {
             ));
         }
 
-        let resolved = self.root.join(path).canonicalize()?;
-        if !resolved.starts_with(&self.root) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "virtual path resolves outside the VFS root",
-            ));
-        }
-        if !resolved.metadata()?.is_file() {
+        if !self.root.metadata(path)?.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "virtual path does not point to a regular file",
             ));
         }
-        fs::read(resolved)
+        self.root.read(path)
     }
 }
 
@@ -79,6 +66,8 @@ fn is_virtual_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct TestDir(PathBuf);
@@ -195,5 +184,35 @@ mod tests {
             vfs.read("external/external.ron").unwrap_err().kind(),
             io::ErrorKind::PermissionDenied
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn follows_relative_links_within_the_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestDir::new();
+        fs::create_dir(root.0.join("settings")).unwrap();
+        fs::write(root.0.join("settings/project.ron"), b"()").unwrap();
+        symlink("settings/project.ron", root.0.join("project.ron")).unwrap();
+        let vfs = DirVfs::new(&root.0).unwrap();
+
+        assert_eq!(vfs.read("project.ron").unwrap(), b"()");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stays_bound_to_the_open_root_after_it_is_renamed() {
+        let parent = TestDir::new();
+        let original = parent.0.join("project");
+        fs::create_dir(&original).unwrap();
+        fs::write(original.join("asset.bin"), b"original").unwrap();
+        let vfs = DirVfs::new(&original).unwrap();
+
+        fs::rename(&original, parent.0.join("renamed")).unwrap();
+        fs::create_dir(&original).unwrap();
+        fs::write(original.join("asset.bin"), b"replacement").unwrap();
+
+        assert_eq!(vfs.read("asset.bin").unwrap(), b"original");
     }
 }
