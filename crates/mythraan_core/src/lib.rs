@@ -7,3 +7,4 @@ pub mod handle;
 pub mod prelude;
 pub mod telemetry;
 pub mod vfs;
+pub mod watcher;

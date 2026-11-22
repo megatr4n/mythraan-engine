@@ -13,6 +13,7 @@ profiling = ["dep:puffin"]
 
 [dependencies]
 cap-std.workspace = true
+notify.workspace = true
 puffin = { workspace = true, optional = true }
 ron.workspace = true
 serde.workspace = true
