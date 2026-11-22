@@ -48,18 +48,17 @@ impl EngineConfig {
             }
         };
 
-        let file: ConfigFile =
-            ron::de::from_bytes(&bytes).map_err(|source| ConfigError::Parse {
+        let file: ConfigFile = ron::de::from_bytes(&bytes).or_else(|source| {
+            if let Ok(header) = ron::de::from_bytes::<ConfigHeader>(&bytes) {
+                check_version(path, header.format_version)?;
+            }
+            Err(ConfigError::Parse {
                 path: path.into(),
                 source: Box::new(source),
-            })?;
+            })
+        })?;
+        check_version(path, file.format_version)?;
 
-        if file.format_version != FORMAT_VERSION {
-            return Err(ConfigError::UnsupportedVersion {
-                path: path.into(),
-                version: file.format_version,
-            });
-        }
         Ok(Self {
             quality: file.quality,
         })
@@ -70,6 +69,21 @@ impl EngineConfig {
     pub const fn quality(&self) -> QualityPreset {
         self.quality
     }
+}
+
+fn check_version(path: &str, version: u32) -> Result<(), ConfigError> {
+    if version != FORMAT_VERSION {
+        return Err(ConfigError::UnsupportedVersion {
+            path: path.into(),
+            version,
+        });
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct ConfigHeader {
+    format_version: u32,
 }
 
 #[derive(Deserialize)]
@@ -158,12 +172,18 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_versions() {
-        let input = MemoryVfs(Ok(b"(format_version: 2)"));
-        let error = EngineConfig::load(&input, PATH).unwrap_err();
-        assert!(matches!(
-            error,
-            ConfigError::UnsupportedVersion { path, version: 2 } if path == PATH
-        ));
+        for bytes in [
+            b"(format_version: 2)" as &[u8],
+            b"(format_version: 2, render_scale: 0.8)",
+            b"(render: (quality: Ultra, scale: 0.8), format_version: 2)",
+            b"(quality: Ultra, format_version: 2)",
+        ] {
+            let error = EngineConfig::load(&MemoryVfs(Ok(bytes)), PATH).unwrap_err();
+            assert!(
+                matches!(error, ConfigError::UnsupportedVersion { ref path, version: 2 } if path == PATH),
+                "{error}"
+            );
+        }
     }
 
     #[test]
