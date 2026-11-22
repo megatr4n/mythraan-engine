@@ -97,6 +97,27 @@ impl<T> Arena<T> {
         self.len -= 1;
         Some(value)
     }
+
+    /// Iterates over live handles and values in slot order.
+    pub fn iter(&self) -> impl Iterator<Item = (Handle<T>, &T)> {
+        self.slots.iter().enumerate().filter_map(|(index, slot)| {
+            slot.value
+                .as_ref()
+                .map(|value| (Handle::new(index, slot.generation), value))
+        })
+    }
+
+    /// Iterates over live handles and mutable values in slot order.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Handle<T>, &mut T)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, slot)| {
+                slot.value
+                    .as_mut()
+                    .map(|value| (Handle::new(index, slot.generation), value))
+            })
+    }
 }
 
 impl<T> Default for Arena<T> {
@@ -179,5 +200,31 @@ mod tests {
         assert!(arena.get(first).is_none());
         assert!(arena.get(last).is_none());
         assert_eq!(arena.get(next), Some(&3));
+    }
+
+    #[test]
+    fn iterates_over_live_slots_with_current_handles() {
+        let mut arena = Arena::new();
+        let first = arena.insert(10);
+        let removed = arena.insert(20);
+        let last = arena.insert(30);
+        assert_eq!(arena.remove(removed), Some(20));
+
+        let visited: Vec<_> = arena
+            .iter_mut()
+            .map(|(handle, value)| {
+                *value += 1;
+                handle
+            })
+            .collect();
+        assert_eq!(visited, [first, last]);
+
+        let current = arena.insert(21);
+        let live: Vec<_> = arena
+            .iter()
+            .map(|(handle, value)| (handle, *value))
+            .collect();
+        assert_eq!(live, [(first, 11), (current, 21), (last, 31)]);
+        assert_ne!(current, removed);
     }
 }
