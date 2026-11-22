@@ -77,6 +77,45 @@ impl<T> fmt::Debug for Handle<T> {
     }
 }
 
+/// A handle borrowed from an arena during iteration.
+///
+/// Use [`Self::to_owned`] to keep a handle after the arena borrow ends.
+pub struct HandleRef<'a, T> {
+    arena: &'a Arc<()>,
+    index: usize,
+    generation: u64,
+    marker: PhantomData<fn() -> T>,
+}
+
+impl<'a, T> HandleRef<'a, T> {
+    pub(crate) const fn new(arena: &'a Arc<()>, index: usize, generation: u64) -> Self {
+        Self {
+            arena,
+            index,
+            generation,
+            marker: PhantomData,
+        }
+    }
+
+    /// Returns the slot index.
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Returns the slot generation.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Creates an owned handle for the same arena, slot, and generation.
+    #[must_use]
+    pub fn to_owned(&self) -> Handle<T> {
+        Handle::new(self.arena, self.index, self.generation)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

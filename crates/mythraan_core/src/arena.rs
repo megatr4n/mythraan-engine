@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::handle::Handle;
+use crate::handle::{Handle, HandleRef};
 
 struct Slot<T> {
     generation: u64,
@@ -127,13 +127,21 @@ impl<T> Arena<T> {
 
     /// Iterates over live handles and values in slot order.
     pub fn iter(&self) -> impl Iterator<Item = (Handle<T>, &T)> {
+        self.iter_borrowed()
+            .map(|(handle, value)| (handle.to_owned(), value))
+    }
+
+    /// Iterates over live values and borrowed handles in slot order.
+    ///
+    /// The iterator borrows the arena identity instead of cloning it for each handle.
+    pub fn iter_borrowed(&self) -> impl Iterator<Item = (HandleRef<'_, T>, &T)> {
         let identity = self.identity.as_ref();
         self.slots
             .iter()
             .enumerate()
             .filter_map(move |(index, slot)| {
                 let value = slot.value.as_ref()?;
-                Some((Handle::new(identity?, index, slot.generation), value))
+                Some((HandleRef::new(identity?, index, slot.generation), value))
             })
     }
 
@@ -303,6 +311,30 @@ mod tests {
             .collect();
         assert_eq!(live, [(first, 11), (current.clone(), 21), (last, 31)]);
         assert_ne!(current, removed);
+    }
+
+    #[test]
+    fn borrows_current_handles_and_skips_vacant_slots() {
+        let mut arena = Arena::new();
+        assert!(arena.iter_borrowed().next().is_none());
+        let first = arena.insert(10);
+        let second = arena.insert(20);
+        assert_eq!(arena.remove(&first), Some(10));
+        let reused = arena.insert(30);
+        assert_eq!(arena.remove(&second), Some(20));
+
+        let owned = {
+            let mut entries = arena.iter_borrowed();
+            let (handle, value) = entries.next().unwrap();
+            assert_eq!(handle.index(), first.index());
+            assert_eq!(handle.generation(), reused.generation());
+            assert_eq!(*value, 30);
+            assert!(entries.next().is_none());
+            handle.to_owned()
+        };
+
+        assert_eq!(owned, reused);
+        assert_eq!(arena.remove(&owned), Some(30));
     }
 
     #[test]
