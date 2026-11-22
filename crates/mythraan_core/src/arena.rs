@@ -1,13 +1,35 @@
 //! Slot storage for values addressed by generational handles.
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use crate::handle::{Handle, HandleRef};
 
 struct Slot<T> {
     generation: u64,
-    value: Option<T>,
-    next_free: Option<usize>,
+    value: SlotValue<T>,
+}
+
+enum SlotValue<T> {
+    Occupied(T),
+    // Free-list links are one-based so that None fits in one word.
+    Vacant(Option<NonZeroUsize>),
+}
+
+impl<T> SlotValue<T> {
+    fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Occupied(value) => Some(value),
+            Self::Vacant(_) => None,
+        }
+    }
+
+    fn as_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Occupied(value) => Some(value),
+            Self::Vacant(_) => None,
+        }
+    }
 }
 
 /// Owns values addressed by handles issued by this arena.
@@ -28,7 +50,7 @@ struct Slot<T> {
 pub struct Arena<T> {
     identity: Option<Arc<()>>,
     slots: Vec<Slot<T>>,
-    free_head: Option<usize>,
+    free_head: Option<NonZeroUsize>,
     len: usize,
 }
 
@@ -60,18 +82,18 @@ impl<T> Arena<T> {
     #[must_use]
     pub fn insert(&mut self, value: T) -> Handle<T> {
         let identity = self.identity.get_or_insert_with(|| Arc::new(()));
-        let handle = if let Some(index) = self.free_head
-            && let Some(slot) = self.slots.get_mut(index)
+        let handle = if let Some(head) = self.free_head
+            && let Some(slot) = self.slots.get_mut(head.get() - 1)
+            && let SlotValue::Vacant(next) = slot.value
         {
-            self.free_head = slot.next_free.take();
-            slot.value = Some(value);
-            Handle::new(identity, index, slot.generation)
+            self.free_head = next;
+            slot.value = SlotValue::Occupied(value);
+            Handle::new(identity, head.get() - 1, slot.generation)
         } else {
             let index = self.slots.len();
             self.slots.push(Slot {
                 generation: 0,
-                value: Some(value),
-                next_free: None,
+                value: SlotValue::Occupied(value),
             });
             Handle::new(identity, index, 0)
         };
@@ -114,12 +136,16 @@ impl<T> Arena<T> {
             return None;
         }
 
-        let value = slot.value.take()?;
+        let previous = std::mem::replace(&mut slot.value, SlotValue::Vacant(None));
+        let SlotValue::Occupied(value) = previous else {
+            slot.value = previous;
+            return None;
+        };
         // An exhausted slot stays vacant so its generations can never repeat.
         if let Some(generation) = slot.generation.checked_add(1) {
             slot.generation = generation;
-            slot.next_free = self.free_head;
-            self.free_head = Some(index);
+            slot.value = SlotValue::Vacant(self.free_head);
+            self.free_head = NonZeroUsize::new(index + 1);
         }
         self.len -= 1;
         Some(value)
