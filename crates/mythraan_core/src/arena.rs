@@ -9,6 +9,20 @@ struct Slot<T> {
 }
 
 /// Owns values addressed by handles issued by this arena.
+///
+/// An arena is `Send` or `Sync` when its stored type is.
+///
+/// ```compile_fail
+/// use mythraan_core::prelude::Arena;
+/// fn require_send<T: Send>() {}
+/// require_send::<Arena<std::rc::Rc<()>>>();
+/// ```
+///
+/// ```compile_fail
+/// use mythraan_core::prelude::Arena;
+/// fn require_sync<T: Sync>() {}
+/// require_sync::<Arena<std::cell::Cell<u32>>>();
+/// ```
 pub struct Arena<T> {
     slots: Vec<Slot<T>>,
     free_head: Option<usize>,
@@ -226,5 +240,15 @@ mod tests {
             .collect();
         assert_eq!(live, [(first, 11), (current, 21), (last, 31)]);
         assert_ne!(current, removed);
+    }
+
+    #[test]
+    fn thread_safety_follows_the_stored_type() {
+        fn require_send<T: Send>() {}
+        fn require_send_sync<T: Send + Sync>() {}
+
+        require_send::<Arena<std::cell::Cell<u32>>>();
+        require_send_sync::<Arena<String>>();
+        require_send_sync::<Handle<std::rc::Rc<()>>>();
     }
 }

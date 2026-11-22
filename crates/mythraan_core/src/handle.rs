@@ -5,6 +5,8 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
 /// Identifies one generation of a slot in the arena that issued it.
+///
+/// Handles are `Send` and `Sync` for any `T`.
 pub struct Handle<T> {
     index: usize,
     generation: u64,
