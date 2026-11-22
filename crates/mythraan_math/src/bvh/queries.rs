@@ -11,25 +11,27 @@ impl Bvh {
     #[must_use]
     pub fn raycast(&self, ray: &Ray) -> Option<(u32, f32)> {
         let (origin, direction) = ray.finite_components()?;
-        let entry = |index| {
-            let bounds = self.nodes().get(index).map(BvhNode::bounds)?;
+        let entry = |index: usize| {
+            let node = self.nodes().get(index)?;
+            let bounds = node.bounds();
             Ray::intersect_slabs(
                 origin,
                 direction,
                 bounds.min.as_dvec3(),
                 bounds.max.as_dvec3(),
             )
-            .map(|parameter| (index, parameter))
+            .map(|parameter| (node, parameter))
         };
 
         let mut closest = None;
-        let mut pending = vec![entry(self.root_index()?)?];
-        while let Some((index, parameter)) = pending.pop() {
+        let mut current = entry(self.root_index()?);
+        let mut pending = Vec::new();
+        while let Some((node, parameter)) = current.take().or_else(|| pending.pop()) {
             if closest.is_some_and(|(_, best)| parameter > best) {
                 continue;
             }
 
-            match *self.nodes().get(index)? {
+            match *node {
                 BvhNode::Leaf { payload, .. } => {
                     if closest.is_none_or(|(best_id, best)| {
                         parameter < best || (parameter == best && payload < best_id)
@@ -37,14 +39,22 @@ impl Bvh {
                         closest = Some((payload, parameter));
                     }
                 }
-                BvhNode::Branch { left, right, .. } => match (entry(left), entry(right)) {
-                    (Some(left), Some(right)) if left.1 <= right.1 => {
-                        pending.extend([right, left]);
-                    }
-                    (Some(left), Some(right)) => pending.extend([left, right]),
-                    (Some(hit), None) | (None, Some(hit)) => pending.push(hit),
-                    (None, None) => {}
-                },
+                BvhNode::Branch { left, right, .. } => {
+                    current = match (entry(left), entry(right)) {
+                        (Some(left), Some(right)) => {
+                            let (near, far) = if left.1 <= right.1 {
+                                (left, right)
+                            } else {
+                                (right, left)
+                            };
+                            if closest.is_none_or(|(_, best)| far.1 <= best) {
+                                pending.push(far);
+                            }
+                            Some(near)
+                        }
+                        (left, right) => left.or(right),
+                    };
+                }
             }
         }
 
