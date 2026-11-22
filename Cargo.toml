@@ -12,6 +12,8 @@ publish = false
 glam = "0.29.3"
 serde = "1.0.228"
 serde_test = "1.0.177"
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 uuid = { version = "1.29.3", default-features = false, features = ["serde"] }
 
 [workspace.lints.rust]
