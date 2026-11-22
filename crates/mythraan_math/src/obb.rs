@@ -1,6 +1,6 @@
 //! Oriented bounding boxes.
 
-use glam::{DQuat, Quat, Vec3};
+use glam::{DMat3, DQuat, Quat, Vec3};
 
 use crate::ray::Ray;
 
@@ -55,7 +55,8 @@ impl Obb {
     /// Checks whether a world-space point lies inside or on the box.
     #[must_use]
     pub fn contains_point(self, point: Vec3) -> bool {
-        let local = self.rotation.conjugate() * (point.as_dvec3() - self.center.as_dvec3());
+        let inverse = DMat3::from_quat(self.rotation.conjugate());
+        let local = inverse * (point.as_dvec3() - self.center.as_dvec3());
         local.abs().cmple(self.half_extents.as_dvec3()).all()
     }
 }
@@ -67,7 +68,8 @@ impl Ray {
     #[must_use]
     pub fn intersects_obb(self, bounds: &Obb) -> Option<f32> {
         let (origin, direction) = self.finite_components()?;
-        let inverse = bounds.rotation.conjugate();
+        // Matrix rotation preserves the local ray components in optimized builds.
+        let inverse = DMat3::from_quat(bounds.rotation.conjugate());
         let origin = inverse * (origin - bounds.center.as_dvec3());
         let direction = inverse * direction;
         let half_extents = bounds.half_extents.as_dvec3();
@@ -128,6 +130,8 @@ mod tests {
 
         assert_eq!(ray.intersects_obb(&bounds), Some(2.0));
         assert_eq!(outside_parallel.intersects_obb(&bounds), None);
+        assert!(bounds.contains_point(bounds.center() + 1.5 * Vec3::Y));
+        assert!(!bounds.contains_point(bounds.center() + Vec3::X));
         assert_eq!(
             Ray {
                 origin: bounds.center(),
