@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TrySendError};
 use std::time::{Duration, Instant};
 
-use notify::event::ModifyKind;
+use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 
@@ -103,10 +103,10 @@ impl FileWatcher {
         let (sender, incoming) = mpsc::sync_channel(QUEUE_CAPACITY);
         let missed = Arc::new(AtomicBool::new(false));
         let callback_missed = Arc::clone(&missed);
-        let mut watcher = notify::recommended_watcher(move |event| {
+        let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let message = Incoming {
                 time: Instant::now(),
-                event,
+                event: event.map(normalize_rename),
             };
             if matches!(sender.try_send(message), Err(TrySendError::Full(_))) {
                 callback_missed.store(true, Ordering::Release);
@@ -135,24 +135,22 @@ impl FileWatcher {
             match message.event {
                 Ok(event) if event.need_rescan() => error = Some(WatchError::RescanRequired),
                 Ok(event) => {
-                    if let Some(kind) = change_kind(event.kind) {
-                        for path in event.paths {
-                            if let Ok(path) = path.strip_prefix(&self.root)
-                                && !path.as_os_str().is_empty()
-                            {
-                                record_change(
-                                    &mut self.pending,
-                                    &mut ready,
-                                    self.quiet_period,
-                                    path,
-                                    PendingChange {
-                                        time: message.time,
-                                        kind,
-                                    },
-                                );
-                            }
+                    for_each_change(&event, |path, kind| {
+                        if let Ok(path) = path.strip_prefix(&self.root)
+                            && !path.as_os_str().is_empty()
+                        {
+                            record_change(
+                                &mut self.pending,
+                                &mut ready,
+                                self.quiet_period,
+                                path,
+                                PendingChange {
+                                    time: message.time,
+                                    kind,
+                                },
+                            );
                         }
-                    }
+                    });
                 }
                 Err(source) => error = Some(source.into()),
             }
@@ -183,13 +181,39 @@ impl FileWatcher {
     }
 }
 
-fn change_kind(event: EventKind) -> Option<FileChangeKind> {
-    match event {
-        EventKind::Create(_) => Some(FileChangeKind::Created),
-        EventKind::Modify(ModifyKind::Name(_)) => None,
-        EventKind::Modify(_) => Some(FileChangeKind::Modified),
-        EventKind::Remove(_) => Some(FileChangeKind::Removed),
-        _ => None,
+fn normalize_rename(mut event: Event) -> Event {
+    if matches!(
+        event.kind,
+        EventKind::Modify(ModifyKind::Name(RenameMode::Any | RenameMode::Other))
+    ) && let [path] = event.paths.as_slice()
+    {
+        event.kind = if matches!(path.try_exists(), Ok(false)) {
+            EventKind::Modify(ModifyKind::Name(RenameMode::From))
+        } else {
+            EventKind::Modify(ModifyKind::Any)
+        };
+    }
+    event
+}
+
+fn for_each_change(event: &Event, mut emit: impl FnMut(&Path, FileChangeKind)) {
+    use FileChangeKind::{Created, Modified, Removed};
+
+    let kind = match event.kind {
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+            if let [from, to] = event.paths.as_slice() {
+                emit(from, Removed);
+                emit(to, Created);
+            }
+            return;
+        }
+        EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(RenameMode::To)) => Created,
+        EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(RenameMode::From)) => Removed,
+        EventKind::Modify(_) => Modified,
+        _ => return,
+    };
+    for path in &event.paths {
+        emit(path, kind);
     }
 }
 
@@ -239,6 +263,22 @@ mod tests {
         assert_eq!(merge(Created, Modified), Some(Created));
         assert_eq!(merge(Removed, Created), Some(Modified));
         assert_eq!(merge(Created, Removed), None);
+    }
+
+    #[test]
+    fn splits_a_rename_into_source_and_destination_changes() {
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+            .add_path("original.ron".into())
+            .add_path("renamed.ron".into());
+        let mut changes = Vec::new();
+        for_each_change(&event, |path, kind| changes.push((path.to_owned(), kind)));
+        assert_eq!(
+            changes,
+            [
+                (PathBuf::from("original.ron"), Removed),
+                (PathBuf::from("renamed.ron"), Created),
+            ]
+        );
     }
 
     #[test]
