@@ -67,28 +67,26 @@ impl Bvh {
     /// Payload IDs are preserved and may repeat. Equal split keys follow input order.
     #[must_use]
     pub fn build(items: impl IntoIterator<Item = (Aabb, u32)>) -> Self {
-        let mut items: Vec<_> = items
-            .into_iter()
+        let inputs: Vec<_> = items.into_iter().collect();
+        let mut items: Vec<_> = inputs
+            .iter()
             .enumerate()
-            .map(|(input_index, (bounds, payload))| BuildItem {
-                bounds,
+            .map(|(input_index, (bounds, _))| BuildItem {
                 centroid: bounds.center(),
-                payload,
                 input_index,
             })
             .collect();
         let mut nodes = Vec::with_capacity(items.len().saturating_mul(2).saturating_sub(1));
-        let root = append_subtree(&mut items, &mut nodes).map(|(index, _)| index);
+        let root = append_subtree(&mut items, &inputs, &mut nodes).map(|(index, _)| index);
         let mut links = vec![NodeLinks::default(); nodes.len()];
-        let mut leaf_indices = BTreeMap::new();
+        let mut next_leaf_id = 0;
         for (index, node) in nodes.iter().enumerate() {
             match *node {
                 BvhNode::Leaf { .. } => {
-                    let id = BvhLeafId(leaf_indices.len());
                     if let Some(link) = links.get_mut(index) {
-                        link.leaf = Some(id);
+                        link.leaf = Some(BvhLeafId(next_leaf_id));
                     }
-                    leaf_indices.insert(id, index);
+                    next_leaf_id += 1;
                 }
                 BvhNode::Branch { left, right, .. } => {
                     let mut height = 0;
@@ -104,11 +102,16 @@ impl Bvh {
                 }
             }
         }
+        let leaf_indices = links
+            .iter()
+            .enumerate()
+            .filter_map(|(index, link)| Some((link.leaf?, index)))
+            .collect();
         Self {
             nodes,
             root,
             links,
-            next_leaf_id: leaf_indices.len(),
+            next_leaf_id,
             leaf_indices,
         }
     }
@@ -139,9 +142,7 @@ impl Bvh {
 }
 
 struct BuildItem {
-    bounds: Aabb,
     centroid: Vec3,
-    payload: u32,
     input_index: usize,
 }
 
@@ -167,33 +168,47 @@ impl Axis {
         }
     }
 
-    fn component(&self, centroid: Vec3) -> f32 {
+    fn partition(self, items: &mut [BuildItem], middle: usize) {
         match self {
-            Self::X => centroid.x,
-            Self::Y => centroid.y,
-            Self::Z => centroid.z,
+            Self::X => partition::<0>(items, middle),
+            Self::Y => partition::<1>(items, middle),
+            Self::Z => partition::<2>(items, middle),
         }
     }
 }
 
-fn append_subtree(items: &mut [BuildItem], nodes: &mut Vec<BvhNode>) -> Option<(usize, Aabb)> {
+fn partition<const AXIS: usize>(items: &mut [BuildItem], middle: usize) {
+    let compare = |left: &BuildItem, right: &BuildItem| {
+        left.centroid[AXIS]
+            .total_cmp(&right.centroid[AXIS])
+            .then_with(|| left.input_index.cmp(&right.input_index))
+    };
+    if let [left, right] = items {
+        if compare(left, right).is_gt() {
+            std::mem::swap(left, right);
+        }
+    } else {
+        items.select_nth_unstable_by(middle, compare);
+    }
+}
+
+fn append_subtree(
+    items: &mut [BuildItem],
+    inputs: &[(Aabb, u32)],
+    nodes: &mut Vec<BvhNode>,
+) -> Option<(usize, Aabb)> {
     let node = match items {
         [] => return None,
-        [item] => BvhNode::Leaf {
-            bounds: item.bounds,
-            payload: item.payload,
-        },
+        [item] => {
+            let &(bounds, payload) = inputs.get(item.input_index)?;
+            BvhNode::Leaf { bounds, payload }
+        }
         _ => {
             let middle = items.len() / 2;
-            let axis = Axis::widest(items);
-            items.select_nth_unstable_by(middle, |left, right| {
-                axis.component(left.centroid)
-                    .total_cmp(&axis.component(right.centroid))
-                    .then_with(|| left.input_index.cmp(&right.input_index))
-            });
+            Axis::widest(items).partition(items, middle);
             let (left_items, right_items) = items.split_at_mut_checked(middle)?;
-            let (left, left_bounds) = append_subtree(left_items, nodes)?;
-            let (right, right_bounds) = append_subtree(right_items, nodes)?;
+            let (left, left_bounds) = append_subtree(left_items, inputs, nodes)?;
+            let (right, right_bounds) = append_subtree(right_items, inputs, nodes)?;
             BvhNode::Branch {
                 bounds: left_bounds.merge(right_bounds),
                 left,
