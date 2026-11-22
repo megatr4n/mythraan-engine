@@ -209,6 +209,26 @@ mod tests {
     }
 
     #[test]
+    fn rejects_handles_from_a_dropped_arena_without_retaining_its_values() {
+        use std::rc::Rc;
+
+        let (old, value) = {
+            let mut arena = Arena::new();
+            let value = Rc::new(10);
+            let weak = Rc::downgrade(&value);
+            (arena.insert(value), weak)
+        };
+        assert!(value.upgrade().is_none());
+
+        let mut replacement = Arena::new();
+        let fresh = replacement.insert(Rc::new(20));
+        assert_eq!(old.index(), fresh.index());
+        assert_eq!(old.generation(), fresh.generation());
+        assert_eq!(replacement.remove(&old), None);
+        assert_eq!(replacement.get(&fresh).map(|value| **value), Some(20));
+    }
+
+    #[test]
     fn reuses_slots_without_reviving_stale_handles() {
         let mut arena = Arena::new();
         let first = arena.insert(String::from("first"));
