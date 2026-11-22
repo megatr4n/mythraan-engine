@@ -1,14 +1,15 @@
 //! Debounced filesystem notifications.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io;
+use std::ops::Bound::{Excluded, Unbounded};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TrySendError};
 use std::time::{Duration, Instant};
 
-use notify::event::{ModifyKind, RenameMode};
+use notify::event::{ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 
@@ -73,6 +74,7 @@ pub struct FileWatcher {
     missed: Arc<AtomicBool>,
     quiet_period: Duration,
     pending: HashMap<PathBuf, PendingChange>,
+    known: BTreeSet<PathBuf>,
 }
 
 impl FileWatcher {
@@ -106,7 +108,7 @@ impl FileWatcher {
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let message = Incoming {
                 time: Instant::now(),
-                event: event.map(normalize_rename),
+                event: event.map(normalize_event),
             };
             if matches!(sender.try_send(message), Err(TrySendError::Full(_))) {
                 callback_missed.store(true, Ordering::Release);
@@ -120,6 +122,7 @@ impl FileWatcher {
             missed,
             quiet_period,
             pending: HashMap::new(),
+            known: BTreeSet::new(),
         })
     }
 
@@ -161,6 +164,7 @@ impl FileWatcher {
         }
         if let Some(error) = error {
             self.pending.clear();
+            self.known.clear();
             return Err(error);
         }
 
@@ -177,21 +181,66 @@ impl FileWatcher {
                     }),
             );
         }
+        for change in &mut ready {
+            classify_change(&mut self.known, change);
+        }
         Ok(ready)
     }
 }
 
-fn normalize_rename(mut event: Event) -> Event {
-    if matches!(
+fn classify_change(known: &mut BTreeSet<PathBuf>, change: &mut FileChange) {
+    match change.kind {
+        FileChangeKind::Created | FileChangeKind::Modified => {
+            if known.contains(&change.path) {
+                change.kind = FileChangeKind::Modified;
+            } else {
+                known.insert(change.path.clone());
+            }
+        }
+        FileChangeKind::Removed => {
+            known.remove(&change.path);
+            let children: Vec<_> = known
+                .range::<Path, _>((Excluded(change.path.as_path()), Unbounded))
+                .take_while(|path| path.starts_with(&change.path))
+                .cloned()
+                .collect();
+            for path in children {
+                known.remove(&path);
+            }
+        }
+    }
+}
+
+fn normalize_event(mut event: Event) -> Event {
+    let ambiguous_rename = matches!(
         event.kind,
         EventKind::Modify(ModifyKind::Name(RenameMode::Any | RenameMode::Other))
-    ) && let [path] = event.paths.as_slice()
+    );
+    let macos_change = cfg!(target_os = "macos")
+        && matches!(
+            event.kind,
+            EventKind::Create(_)
+                | EventKind::Remove(_)
+                | EventKind::Modify(
+                    ModifyKind::Any
+                        | ModifyKind::Data(_)
+                        | ModifyKind::Metadata(_)
+                        | ModifyKind::Other
+                )
+        );
+    // Resolve coalesced FSEvents flags on the callback thread.
+    if (ambiguous_rename || macos_change)
+        && let [path] = event.paths.as_slice()
     {
-        event.kind = if matches!(path.try_exists(), Ok(false)) {
-            EventKind::Modify(ModifyKind::Name(RenameMode::From))
-        } else {
-            EventKind::Modify(ModifyKind::Any)
-        };
+        match path.symlink_metadata() {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                event.kind = EventKind::Remove(RemoveKind::Any);
+            }
+            Ok(_) if ambiguous_rename || matches!(event.kind, EventKind::Remove(_)) => {
+                event.kind = EventKind::Modify(ModifyKind::Any);
+            }
+            _ => {}
+        }
     }
     event
 }
@@ -279,6 +328,32 @@ mod tests {
                 (PathBuf::from("renamed.ron"), Created),
             ]
         );
+    }
+
+    #[test]
+    fn repeated_creation_is_a_modification_until_removal() {
+        let path = PathBuf::from("assets/shader.wgsl");
+        let mut known = BTreeSet::new();
+        for (reported, expected) in [
+            (Created, Created),
+            (Created, Modified),
+            (Removed, Removed),
+            (Created, Created),
+        ] {
+            let mut change = FileChange {
+                path: path.clone(),
+                kind: reported,
+            };
+            classify_change(&mut known, &mut change);
+            assert_eq!(change.kind, expected);
+        }
+
+        let mut directory = FileChange {
+            path: "assets".into(),
+            kind: Removed,
+        };
+        classify_change(&mut known, &mut directory);
+        assert!(known.is_empty());
     }
 
     #[test]
