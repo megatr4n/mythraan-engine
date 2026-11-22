@@ -1,7 +1,86 @@
+use glam::{BVec3, DVec3};
+
 use super::{Bvh, BvhNode};
 use crate::aabb::Aabb;
 use crate::frustum::Frustum;
 use crate::ray::Ray;
+
+struct RaySlabs {
+    origin: DVec3,
+    direction: DVec3,
+    reciprocal: DVec3,
+    parallel: BVec3,
+    negative: BVec3,
+    exact_reciprocal: bool,
+}
+
+impl RaySlabs {
+    fn new(ray: Ray) -> Option<Self> {
+        let (origin, direction) = ray.finite_components()?;
+        // For f32 inputs promoted to f64, powers of two have exact reciprocals.
+        // Masked parallel axes also have all fraction bits clear.
+        const FRACTION_MASK: u64 = (1 << (f64::MANTISSA_DIGITS - 1)) - 1;
+        let exact_reciprocal = direction
+            .to_array()
+            .iter()
+            .all(|axis| axis.to_bits() & FRACTION_MASK == 0);
+        Some(Self {
+            origin,
+            direction,
+            reciprocal: direction.recip(),
+            parallel: direction.cmpeq(DVec3::ZERO),
+            negative: direction.cmplt(DVec3::ZERO),
+            exact_reciprocal,
+        })
+    }
+
+    fn entry<const EXACT_RECIPROCAL: bool>(&self, bounds: Aabb) -> Option<f32> {
+        let min = bounds.min.as_dvec3();
+        let max = bounds.max.as_dvec3();
+        if (self.parallel & !(min.cmple(self.origin) & self.origin.cmple(max))).any() {
+            return None;
+        }
+
+        let near_plane = DVec3::select(self.negative, max, min);
+        let far_plane = DVec3::select(self.negative, min, max);
+        let near = DVec3::select(
+            self.parallel,
+            DVec3::NEG_INFINITY,
+            (near_plane - self.origin) * self.reciprocal,
+        )
+        .max_element()
+        .max(0.0);
+        let far = DVec3::select(
+            self.parallel,
+            DVec3::INFINITY,
+            (far_plane - self.origin) * self.reciprocal,
+        )
+        .min_element();
+
+        if EXACT_RECIPROCAL {
+            return if near <= far {
+                Ray::forward_hit(near)
+            } else {
+                None
+            };
+        }
+
+        // Finite f32 inputs keep division and reciprocal products in f64 range.
+        // Bound the difference from rounded division before deciding contact
+        // or rounding to f32. Ambiguous cases use the original divisions.
+        let near_error = near * (4.0 * f64::EPSILON);
+        let far_error = far.abs() * (4.0 * f64::EPSILON);
+        let lower = near - near_error;
+        let upper = near + near_error;
+        if lower > far + far_error {
+            return None;
+        }
+        if upper <= far - far_error && lower as f32 == upper as f32 {
+            return Ray::forward_hit(near);
+        }
+        Ray::intersect_slabs(self.origin, self.direction, min, max)
+    }
+}
 
 impl Bvh {
     /// Returns the payload and first hit parameter of the nearest leaf box.
@@ -10,17 +89,18 @@ impl Bvh {
     /// smaller payload ID.
     #[must_use]
     pub fn raycast(&self, ray: &Ray) -> Option<(u32, f32)> {
-        let (origin, direction) = ray.finite_components()?;
+        let slabs = RaySlabs::new(*ray)?;
+        if slabs.exact_reciprocal {
+            self.raycast_with(|bounds| slabs.entry::<true>(bounds))
+        } else {
+            self.raycast_with(|bounds| slabs.entry::<false>(bounds))
+        }
+    }
+
+    fn raycast_with(&self, intersect: impl Fn(Aabb) -> Option<f32>) -> Option<(u32, f32)> {
         let entry = |index: usize| {
             let node = self.nodes().get(index)?;
-            let bounds = node.bounds();
-            Ray::intersect_slabs(
-                origin,
-                direction,
-                bounds.min.as_dvec3(),
-                bounds.max.as_dvec3(),
-            )
-            .map(|parameter| (node, parameter))
+            intersect(node.bounds()).map(|parameter| (node, parameter))
         };
 
         let mut closest = None;
@@ -109,6 +189,45 @@ impl Bvh {
 mod tests {
     use super::*;
     use glam::{Mat4, Vec3};
+
+    #[test]
+    fn raycast_preserves_corner_contacts_and_extreme_distances() {
+        let point = |position| Aabb {
+            min: position,
+            max: position,
+        };
+        let corner = Vec3::new(49.0, -1.0, 1.0);
+        let ray = Ray {
+            origin: Vec3::ZERO,
+            direction: corner,
+        };
+        for (ray, bounds, expected) in [
+            (ray, point(corner), Some(1.0)),
+            (ray, point(corner + Vec3::Y), None),
+            (
+                Ray {
+                    origin: -Vec3::X * f32::MAX,
+                    direction: Vec3::X * f32::MAX,
+                },
+                point(Vec3::X * f32::MAX),
+                Some(2.0),
+            ),
+            (
+                Ray {
+                    origin: Vec3::ZERO,
+                    direction: Vec3::new(f32::from_bits(1), -0.0, 0.0),
+                },
+                point(Vec3::X),
+                None,
+            ),
+        ] {
+            assert_eq!(ray.intersects_aabb(&bounds), expected);
+            assert_eq!(
+                Bvh::build([(bounds, 7)]).raycast(&ray),
+                expected.map(|t| (7, t))
+            );
+        }
+    }
 
     #[test]
     fn raycast_returns_nearest_payload_and_breaks_ties_by_id() {
