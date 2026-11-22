@@ -46,6 +46,11 @@ impl Rng {
             }
         }
     }
+
+    /// Samples a 24-bit fraction in `[0, 1)`.
+    pub fn next_f32(&mut self) -> f32 {
+        (self.next_u32() >> 8) as f32 * (1.0 / 16_777_216.0)
+    }
 }
 
 #[cfg(test)]
@@ -119,5 +124,16 @@ mod tests {
             assert_eq!(rng.range_u32(start..end), None);
         }
         assert_eq!(rng.next_u64(), replay.next_u64());
+    }
+
+    #[test]
+    fn float_samples_have_fixed_bits_and_stay_below_one() {
+        let mut rng = Rng::from_seed(0);
+        let expected = [0x3f62_20a8, 0x3edc_f13c, 0x3cd8_8ba0, 0x3f78_8bb8];
+
+        assert_eq!(expected.map(|_| rng.next_f32().to_bits()), expected);
+        for _ in 0..1_000 {
+            assert!((0.0..1.0).contains(&rng.next_f32()));
+        }
     }
 }
