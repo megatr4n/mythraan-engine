@@ -10,6 +10,9 @@ publish = false
 [workspace.dependencies]
 # every third-party and workspace crate version is declared here, once
 glam = "0.29.3"
+serde = "1.0.228"
+serde_test = "1.0.177"
+uuid = { version = "1.29.3", default-features = false, features = ["serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
