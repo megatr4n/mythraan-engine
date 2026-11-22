@@ -56,6 +56,16 @@ impl<T> Arena<T> {
         }
         slot.value.as_ref()
     }
+
+    /// Returns a mutable reference for a live handle, in O(1) time.
+    #[must_use]
+    pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
+        let slot = self.slots.get_mut(handle.index())?;
+        if slot.generation != handle.generation() {
+            return None;
+        }
+        slot.value.as_mut()
+    }
 }
 
 impl<T> Default for Arena<T> {
@@ -81,5 +91,15 @@ mod tests {
         assert_eq!(arena.get(first).unwrap().0, "first");
         assert_eq!(arena.get(second).unwrap().0, "second");
         assert!(arena.get(Handle::new(usize::MAX, 0)).is_none());
+    }
+
+    #[test]
+    fn updates_a_value_through_its_handle() {
+        let mut arena = Arena::new();
+        let handle = arena.insert(String::from("one"));
+        arena.get_mut(handle).unwrap().push_str(" two");
+
+        assert_eq!(arena.get(handle).map(String::as_str), Some("one two"));
+        assert!(arena.get_mut(Handle::new(handle.index(), 1)).is_none());
     }
 }
