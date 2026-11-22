@@ -5,11 +5,13 @@ use crate::handle::Handle;
 struct Slot<T> {
     generation: u64,
     value: Option<T>,
+    next_free: Option<usize>,
 }
 
 /// Owns values addressed by handles issued by this arena.
 pub struct Arena<T> {
     slots: Vec<Slot<T>>,
+    free_head: Option<usize>,
     len: usize,
 }
 
@@ -19,6 +21,7 @@ impl<T> Arena<T> {
     pub const fn new() -> Self {
         Self {
             slots: Vec::new(),
+            free_head: None,
             len: 0,
         }
     }
@@ -38,13 +41,23 @@ impl<T> Arena<T> {
     /// Stores a value and returns its handle. Takes amortized O(1) time.
     #[must_use]
     pub fn insert(&mut self, value: T) -> Handle<T> {
-        let index = self.slots.len();
-        self.slots.push(Slot {
-            generation: 0,
-            value: Some(value),
-        });
+        let handle = if let Some(index) = self.free_head
+            && let Some(slot) = self.slots.get_mut(index)
+        {
+            self.free_head = slot.next_free.take();
+            slot.value = Some(value);
+            Handle::new(index, slot.generation)
+        } else {
+            let index = self.slots.len();
+            self.slots.push(Slot {
+                generation: 0,
+                value: Some(value),
+                next_free: None,
+            });
+            Handle::new(index, 0)
+        };
         self.len += 1;
-        Handle::new(index, 0)
+        handle
     }
 
     /// Returns the value for a live handle, in O(1) time.
@@ -65,6 +78,24 @@ impl<T> Arena<T> {
             return None;
         }
         slot.value.as_mut()
+    }
+
+    /// Removes and returns the value for a live handle, in O(1) time.
+    pub fn remove(&mut self, handle: Handle<T>) -> Option<T> {
+        let slot = self.slots.get_mut(handle.index())?;
+        if slot.generation != handle.generation() {
+            return None;
+        }
+
+        let value = slot.value.take()?;
+        // An exhausted slot stays vacant so its generations can never repeat.
+        if let Some(generation) = slot.generation.checked_add(1) {
+            slot.generation = generation;
+            slot.next_free = self.free_head;
+            self.free_head = Some(handle.index());
+        }
+        self.len -= 1;
+        Some(value)
     }
 }
 
@@ -101,5 +132,32 @@ mod tests {
 
         assert_eq!(arena.get(handle).map(String::as_str), Some("one two"));
         assert!(arena.get_mut(Handle::new(handle.index(), 1)).is_none());
+    }
+
+    #[test]
+    fn reuses_slots_without_reviving_stale_handles() {
+        let mut arena = Arena::new();
+        let first = arena.insert(String::from("first"));
+        let second = arena.insert(String::from("second"));
+
+        assert_eq!(arena.remove(first).as_deref(), Some("first"));
+        assert!(arena.get(first).is_none());
+        assert!(arena.get_mut(first).is_none());
+        assert!(arena.remove(first).is_none());
+        assert_eq!(arena.remove(second).as_deref(), Some("second"));
+        assert!(arena.is_empty());
+
+        let a = arena.insert(String::from("a"));
+        let b = arena.insert(String::from("b"));
+        assert_eq!(a.index(), second.index());
+        assert_eq!(b.index(), first.index());
+        assert_ne!(a.generation(), second.generation());
+        assert_ne!(b.generation(), first.generation());
+        assert!(arena.get(first).is_none());
+        assert!(arena.get_mut(second).is_none());
+        assert!(arena.remove(first).is_none());
+        assert_eq!(arena.get(a).map(String::as_str), Some("a"));
+        assert_eq!(arena.get(b).map(String::as_str), Some("b"));
+        assert_eq!(arena.len(), 2);
     }
 }
