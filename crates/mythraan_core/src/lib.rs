@@ -2,6 +2,7 @@
 
 pub mod arena;
 pub mod asset_id;
+pub mod config;
 pub mod handle;
 pub mod prelude;
 pub mod telemetry;

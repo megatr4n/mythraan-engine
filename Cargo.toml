@@ -11,8 +11,10 @@ publish = false
 # every third-party and workspace crate version is declared here, once
 glam = "0.29.3"
 puffin = { version = "0.20.0", default-features = false }
-serde = "1.0.228"
+ron = "0.12.3"
+serde = { version = "1.0.229", features = ["derive"] }
 serde_test = "1.0.177"
+thiserror = "2.0.21"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 uuid = { version = "1.29.3", default-features = false, features = ["serde"] }

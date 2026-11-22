@@ -13,7 +13,9 @@ profiling = ["dep:puffin"]
 
 [dependencies]
 puffin = { workspace = true, optional = true }
+ron.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
