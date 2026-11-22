@@ -147,13 +147,21 @@ impl<T> Arena<T> {
 
     /// Iterates over live handles and mutable values in slot order.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (Handle<T>, &mut T)> {
+        self.iter_mut_borrowed()
+            .map(|(handle, value)| (handle.to_owned(), value))
+    }
+
+    /// Iterates over live mutable values and borrowed handles in slot order.
+    ///
+    /// The iterator borrows the arena identity instead of cloning it for each handle.
+    pub fn iter_mut_borrowed(&mut self) -> impl Iterator<Item = (HandleRef<'_, T>, &mut T)> {
         let identity = self.identity.as_ref();
         self.slots
             .iter_mut()
             .enumerate()
             .filter_map(move |(index, slot)| {
                 let value = slot.value.as_mut()?;
-                Some((Handle::new(identity?, index, slot.generation), value))
+                Some((HandleRef::new(identity?, index, slot.generation), value))
             })
     }
 
@@ -335,6 +343,29 @@ mod tests {
 
         assert_eq!(owned, reused);
         assert_eq!(arena.remove(&owned), Some(30));
+    }
+
+    #[test]
+    fn borrowed_iteration_updates_values_and_can_keep_selected_handles() {
+        let mut arena = Arena::new();
+        let first = arena.insert(10);
+        let removed = arena.insert(20);
+        let last = arena.insert(30);
+        assert_eq!(arena.remove(&removed), Some(20));
+
+        let mut retained = None;
+        for (handle, value) in arena.iter_mut_borrowed() {
+            *value += 1;
+            if handle.index() == last.index() {
+                retained = Some(handle.to_owned());
+            }
+        }
+
+        let retained = retained.unwrap();
+        assert_eq!(retained, last);
+        assert_eq!(arena.get(&first), Some(&11));
+        assert_eq!(arena.get(&retained), Some(&31));
+        assert_eq!(arena.get(&removed), None);
     }
 
     #[test]
