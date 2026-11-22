@@ -8,6 +8,7 @@ pub mod obb;
 pub mod plane;
 pub mod prelude;
 pub mod ray;
+pub mod rng;
 pub mod sphere;
 pub mod transform;
 
