@@ -10,6 +10,7 @@ publish = false
 [workspace.dependencies]
 # every third-party and workspace crate version is declared here, once
 cap-std = "3.4.6"
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 glam = "0.29.3"
 notify = "=8.0.0"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

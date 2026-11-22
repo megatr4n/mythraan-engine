@@ -12,4 +12,9 @@ publish.workspace = true
 glam.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
+
+[[bench]]
+name = "bvh"
+harness = false
