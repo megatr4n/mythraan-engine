@@ -127,6 +127,36 @@ mod tests {
     }
 
     #[test]
+    fn loads_engine_config_from_the_directory_backend() {
+        use crate::config::ConfigError;
+        use crate::prelude::{EngineConfig, QualityPreset};
+
+        let root = TestDir::new();
+        let vfs = DirVfs::new(&root.0).unwrap();
+        let path = "project.ron";
+        let file = root.0.join(path);
+
+        assert_eq!(
+            EngineConfig::load(&vfs, path).unwrap().quality(),
+            QualityPreset::Medium
+        );
+        fs::write(&file, b"(format_version: 1, quality: Low)").unwrap();
+        assert_eq!(
+            EngineConfig::load(&vfs, path).unwrap().quality(),
+            QualityPreset::Low
+        );
+        fs::write(&file, b"(format_version: 1, quality: Broken)").unwrap();
+        assert!(matches!(
+            EngineConfig::load(&vfs, path),
+            Err(ConfigError::Parse { path: invalid, .. }) if invalid == path
+        ));
+        assert!(matches!(
+            EngineConfig::load(&vfs, "../project.ron"),
+            Err(ConfigError::Read { source, .. }) if source.kind() == io::ErrorKind::InvalidInput
+        ));
+    }
+
+    #[test]
     fn rejects_absolute_parent_and_nonportable_paths() {
         let root = TestDir::new();
         let vfs = DirVfs::new(&root.0).unwrap();
