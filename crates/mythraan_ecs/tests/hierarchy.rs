@@ -62,3 +62,27 @@ fn despawning_a_branch_removes_its_descendants_and_unlinks_it() {
     assert_eq!(world.children(root).unwrap().as_slice(), [sibling]);
     assert_eq!(world.parent(sibling).map(Parent::entity), Some(root));
 }
+
+#[test]
+fn stale_links_cannot_reparent_or_unlink_live_entities() {
+    let mut world = World::new();
+    let original = world.spawn().unwrap();
+    let root = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    world.set_parent(original, Some(root)).unwrap();
+    assert!(world.despawn(original));
+    let replacement = world.spawn().unwrap();
+    assert_eq!(replacement.index(), original.index());
+    assert_ne!(replacement, original);
+
+    world.set_parent(child, Some(root)).unwrap();
+    assert!(
+        matches!(world.set_parent(child, Some(original)), Err(HierarchyError::EntityNotAlive(entity)) if entity == original)
+    );
+    assert!(
+        matches!(world.set_parent(original, Some(root)), Err(HierarchyError::EntityNotAlive(entity)) if entity == original)
+    );
+    assert_eq!(world.parent(child).map(Parent::entity), Some(root));
+    assert_eq!(world.parent(replacement), None);
+    assert_eq!(world.children(root).unwrap().as_slice(), [child]);
+}
