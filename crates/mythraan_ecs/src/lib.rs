@@ -15,9 +15,9 @@ mod resources;
 mod sparse_set;
 mod world;
 
-pub use command_buffer::CommandBuffer;
+pub use command_buffer::{CommandBuffer, CommandFailure, FlushReport};
 pub use entity::{Entity, EntityAllocator};
-pub use error::{EntityAllocError, QueryError, SparseSetError, WorldInsertError};
+pub use error::{CommandError, EntityAllocError, QueryError, SparseSetError, WorldInsertError};
 pub use query::{Query, ReadQuery};
 pub use query_mut::{QueryFilter, QueryMut, With, Without, WriteQuery};
 pub use resources::Resources;

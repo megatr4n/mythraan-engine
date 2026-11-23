@@ -4,6 +4,14 @@ use thiserror::Error;
 
 use crate::Entity;
 
+/// A queued structural change failed during a flush.
+#[derive(Debug, Error)]
+pub enum CommandError {
+    /// A queued component could not be inserted.
+    #[error(transparent)]
+    Insert(#[from] WorldInsertError),
+}
+
 /// An exclusive query requests conflicting access to a component.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("conflicting query access to component {component}")]
