@@ -150,3 +150,48 @@ fn filtered_reads_order_writes_while_deferred_commands_share_the_batch() {
     );
     assert_eq!(graph, ConflictGraph::new(&systems));
 }
+
+#[test]
+fn a_long_write_chain_keeps_one_edge_per_successor() {
+    const SYSTEMS: usize = 4_096;
+    let write = SystemAccess::of::<QueryMut<'_, &mut u32>>();
+    let graph = ConflictGraph::new(&vec![write; SYSTEMS]);
+
+    assert_eq!(graph.batches().len(), SYSTEMS);
+    assert!(
+        graph
+            .batches()
+            .enumerate()
+            .all(|(system, batch)| batch == [system])
+    );
+    assert_eq!(graph.predecessors(0), Some([].as_slice()));
+    for system in 1..SYSTEMS {
+        assert_eq!(graph.predecessors(system), Some([system - 1].as_slice()));
+    }
+}
+
+#[test]
+fn a_writer_waits_for_every_reader_since_the_previous_write() {
+    const READERS: usize = 4_096;
+    let write = SystemAccess::of::<ResMut<'_, u32>>();
+    let read = SystemAccess::of::<Res<'_, u32>>();
+    let mut systems = Vec::with_capacity(READERS + 2);
+    systems.push(write.clone());
+    systems.resize(READERS + 1, read);
+    systems.push(write);
+
+    let graph = ConflictGraph::new(&systems);
+    let batches: Vec<_> = graph.batches().collect();
+    assert_eq!(batches.len(), 3);
+    assert_eq!(batches[0], [0]);
+    assert!(batches[1].iter().copied().eq(1..=READERS));
+    assert_eq!(batches[2], [READERS + 1]);
+    assert!(
+        graph
+            .predecessors(READERS + 1)
+            .unwrap()
+            .iter()
+            .copied()
+            .eq(1..=READERS)
+    );
+}
