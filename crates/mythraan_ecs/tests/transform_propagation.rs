@@ -1,8 +1,16 @@
 //! World-space transforms through the public hierarchy API.
 
-use mythraan_ecs::prelude::{Changed, World};
+use mythraan_ecs::prelude::{Changed, CommandBuffer, Entity, World};
 use mythraan_math::glam::{Quat, Vec3};
 use mythraan_math::transform::{GlobalTransform, Transform};
+
+fn origin(world: &World, entity: Entity) -> Vec3 {
+    world
+        .get::<GlobalTransform>(entity)
+        .unwrap()
+        .0
+        .transform_point3(Vec3::ZERO)
+}
 
 #[test]
 fn propagation_composes_parent_space_before_children() {
@@ -105,27 +113,47 @@ fn reparenting_or_detaching_a_group_updates_its_transformed_descendants() {
 
     world.set_parent(group, Some(right)).unwrap();
     world.propagate_transforms().unwrap();
-    assert_eq!(
-        world
-            .get::<GlobalTransform>(leaf)
-            .unwrap()
-            .0
-            .transform_point3(Vec3::ZERO),
-        Vec3::X * 21.0
-    );
+    assert_eq!(origin(&world, leaf), Vec3::X * 21.0);
+    let mut changed = Vec::new();
     world
         .query_filtered_mut::<&GlobalTransform, Changed<GlobalTransform>>()
         .unwrap()
-        .for_each(|entity, _| assert_eq!(entity, leaf));
+        .for_each(|entity, _| changed.push(entity));
+    assert_eq!(changed, [leaf]);
 
     world.set_parent(group, None).unwrap();
     world.propagate_transforms().unwrap();
-    assert_eq!(
-        world
-            .get::<GlobalTransform>(leaf)
-            .unwrap()
-            .0
-            .transform_point3(Vec3::ZERO),
-        Vec3::X
+    assert_eq!(origin(&world, leaf), Vec3::X);
+}
+
+#[test]
+fn mutable_queries_and_flushed_commands_invalidate_cached_transforms() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Transform::IDENTITY).unwrap();
+    world.propagate_transforms().unwrap();
+
+    world
+        .query_mut::<&mut Transform>()
+        .unwrap()
+        .for_each(|_, transform| {
+            transform.translation = Vec3::Z;
+        });
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, entity), Vec3::Z);
+
+    let mut commands = CommandBuffer::new();
+    commands.insert(
+        entity,
+        Transform {
+            translation: Vec3::Y,
+            ..Transform::IDENTITY
+        },
     );
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, entity), Vec3::Z);
+
+    assert!(commands.flush(&mut world).failures().is_empty());
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, entity), Vec3::Y);
 }
