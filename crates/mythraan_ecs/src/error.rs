@@ -10,6 +10,23 @@ use crate::Entity;
 #[error("world change tick exhausted")]
 pub struct ChangeTickError;
 
+/// A schedule could not prepare or execute a system's storage access.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ScheduleError {
+    /// A batch's declared access could not be borrowed.
+    #[error(transparent)]
+    Batch(#[from] ScopeError),
+    /// A system returned an access error during execution.
+    #[error("system {system} failed: {source}")]
+    System {
+        /// Registration index of the failing system.
+        system: usize,
+        /// Error returned by the system.
+        #[source]
+        source: ScopeError,
+    },
+}
+
 /// The kind of storage involved in a scoped access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StorageKind {

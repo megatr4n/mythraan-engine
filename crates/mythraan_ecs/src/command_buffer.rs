@@ -213,6 +213,10 @@ impl CommandBuffer {
         Self::default()
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+
     /// Queues creation of an empty entity and returns its placeholder.
     pub fn spawn(&mut self) -> DeferredEntity {
         let batch = self.batch.get_or_insert_with(|| Arc::new(()));

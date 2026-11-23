@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 mythraan_math.workspace = true
+rayon.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
