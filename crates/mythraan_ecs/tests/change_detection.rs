@@ -1,6 +1,6 @@
 //! Change detection through the public ECS API.
 
-use mythraan_ecs::prelude::{Added, Changed, Entity, With, Without, World};
+use mythraan_ecs::prelude::{Added, Changed, CommandBuffer, Entity, With, Without, World};
 
 fn added(world: &mut World) -> Vec<Entity> {
     let mut matches = Vec::new();
@@ -177,4 +177,33 @@ fn change_windows_compose_with_presence_filters_and_skip_unchanged_rows() {
         .unwrap()
         .for_each(|entity, _| matches.push(entity));
     assert_eq!(matches, [matching]);
+}
+
+#[test]
+fn deferred_writes_are_tracked_at_flush_time() {
+    let mut world = World::new();
+    let existing = world.spawn().unwrap();
+    world.insert(existing, 1_u32).unwrap();
+    world.advance_change_tick().unwrap();
+
+    let mut commands = CommandBuffer::new();
+    let new = commands.spawn();
+    commands.insert(&new, 2_u32);
+    commands.insert(existing, 3_u32);
+    assert!(added(&mut world).is_empty());
+    assert!(changed(&mut world).is_empty());
+
+    world.advance_change_tick().unwrap();
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    let new = report.resolve(&new).unwrap();
+    assert_eq!(added(&mut world), [new]);
+    let matches = changed(&mut world);
+    assert_eq!(matches.len(), 2);
+    assert!(matches.contains(&new));
+    assert!(matches.contains(&existing));
+    assert_eq!(world.get::<u32>(existing), Some(&3));
+    world.advance_change_tick().unwrap();
+    assert!(added(&mut world).is_empty());
+    assert!(changed(&mut world).is_empty());
 }
