@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use mythraan_ecs::prelude::Stages;
+#[cfg(feature = "reflect")]
+use mythraan_ecs::reflection::{ReflectFields, RegisterTypeError};
 use mythraan_ecs::{Schedule, World};
 
 use crate::time::FIXED_HZ;
@@ -77,6 +79,18 @@ impl App {
     pub fn insert_resource<T: Send + Sync + 'static>(&mut self, resource: T) -> &mut Self {
         self.world.resources_mut().insert(resource);
         self
+    }
+
+    /// Registers a component for metadata and named field access in the app world.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a different type already uses the same name.
+    #[cfg(feature = "reflect")]
+    pub fn register_type<T: ReflectFields + Send + Sync>(
+        &mut self,
+    ) -> Result<(), RegisterTypeError> {
+        self.world.register_type::<T>()
     }
 
     /// Borrows the application world.
