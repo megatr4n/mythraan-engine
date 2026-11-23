@@ -1,6 +1,7 @@
 //! Conflict-aware execution through the public schedule API.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use mythraan_ecs::CommandError;
 use mythraan_ecs::prelude::{Commands, Query, Res, ResMut, Schedule, SystemAccess, World};
@@ -122,4 +123,62 @@ fn a_failed_command_reports_its_system_and_does_not_prevent_later_commands() {
     assert!(second.report.failures().is_empty());
     assert_eq!(world.get::<u32>(live), Some(&2));
     assert_eq!(world.get::<bool>(live), Some(&true));
+}
+
+#[test]
+fn independent_systems_overlap_and_a_dependent_system_waits_for_both() {
+    let mut world = World::new();
+    world.resources_mut().insert(1_u32);
+    world.resources_mut().insert(false);
+    let rendezvous = {
+        let ready = Arc::new((Mutex::new(0), Condvar::new()));
+        move || {
+            let (count, signal) = &*ready;
+            let mut count = count.lock().unwrap();
+            *count += 1;
+            signal.notify_all();
+            let (count, _) = signal
+                .wait_timeout_while(count, Duration::from_secs(5), |count| *count < 2)
+                .unwrap();
+            assert_eq!(*count, 2, "the two compatible systems must overlap");
+        }
+    };
+    let first = rendezvous.clone();
+    let mut schedule = Schedule::new();
+    schedule.add_system(
+        SystemAccess::of::<ResMut<'_, u32>>(),
+        move |mut scope, _| {
+            let mut number = scope.resources.get_mut::<u32>()?.unwrap();
+            first();
+            *number += 5;
+            Ok(())
+        },
+    );
+    schedule.add_system(
+        SystemAccess::of::<ResMut<'_, bool>>(),
+        move |mut scope, _| {
+            let mut flag = scope.resources.get_mut::<bool>()?.unwrap();
+            rendezvous();
+            *flag = true;
+            Ok(())
+        },
+    );
+    schedule.add_system(
+        SystemAccess::of::<(Res<'_, u32>, Res<'_, bool>)>(),
+        |scope, _| {
+            assert_eq!(*scope.resources.get::<u32>()?.unwrap(), 6);
+            assert!(*scope.resources.get::<bool>()?.unwrap());
+            Ok(())
+        },
+    );
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    assert!(
+        pool.install(|| schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
 }
