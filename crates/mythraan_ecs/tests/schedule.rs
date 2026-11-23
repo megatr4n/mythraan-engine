@@ -182,3 +182,44 @@ fn independent_systems_overlap_and_a_dependent_system_waits_for_both() {
             .is_empty()
     );
 }
+
+#[test]
+fn repeated_runs_keep_callback_state_and_new_systems_rebuild_the_batches() {
+    let mut world = World::new();
+    world.resources_mut().insert(1_u32);
+    world.resources_mut().insert(false);
+    let mut schedule = Schedule::new();
+    let mut increment = 1;
+    schedule.add_system(
+        SystemAccess::of::<ResMut<'_, u32>>(),
+        move |mut scope, _| {
+            *scope.resources.get_mut::<u32>()?.unwrap() += increment;
+            increment += 1;
+            Ok(())
+        },
+    );
+    schedule.add_system(SystemAccess::of::<ResMut<'_, u32>>(), |mut scope, _| {
+        *scope.resources.get_mut::<u32>()?.unwrap() *= 2;
+        Ok(())
+    });
+    schedule.add_system(SystemAccess::of::<ResMut<'_, bool>>(), |mut scope, _| {
+        let mut flag = scope.resources.get_mut::<bool>()?.unwrap();
+        *flag = !*flag;
+        Ok(())
+    });
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert_eq!(world.resources().get::<u32>(), Some(&4));
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert_eq!(world.resources().get::<u32>(), Some(&12));
+
+    let reader = schedule.add_system(
+        SystemAccess::of::<(Res<'_, u32>, Res<'_, bool>)>(),
+        |scope, _| {
+            assert_eq!(*scope.resources.get::<u32>()?.unwrap(), 30);
+            assert!(*scope.resources.get::<bool>()?.unwrap());
+            Ok(())
+        },
+    );
+    assert_eq!(reader, 3);
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+}

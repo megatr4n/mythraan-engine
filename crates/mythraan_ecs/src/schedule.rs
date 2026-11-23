@@ -1,3 +1,5 @@
+use std::mem;
+
 use rayon::prelude::*;
 
 use crate::{
@@ -20,12 +22,8 @@ struct RegisteredSystem {
 }
 
 impl RegisteredSystem {
-    fn execute(
-        &mut self,
-        scope: SystemScope<'_>,
-        uses_commands: bool,
-    ) -> Result<Option<CommandBuffer>, ScheduleError> {
-        let mut commands = uses_commands.then(|| self.commands.take().unwrap_or_default());
+    fn execute(&mut self, scope: SystemScope<'_>) -> Result<Option<CommandBuffer>, ScheduleError> {
+        let mut commands = self.commands.as_mut().map(mem::take);
         (self.callback)(scope, commands.as_mut().map(Commands::new)).map_err(|source| {
             ScheduleError::System {
                 system: self.index,
@@ -53,6 +51,7 @@ pub struct SystemFlush {
 pub struct Schedule {
     accesses: Vec<SystemAccess>,
     systems: Vec<RegisteredSystem>,
+    batches_dirty: bool,
 }
 
 impl Schedule {
@@ -78,13 +77,15 @@ impl Schedule {
         + 'static,
     ) -> usize {
         let index = self.accesses.len();
+        let commands = access.uses_commands().then(CommandBuffer::new);
         self.accesses.push(access);
         self.systems.push(RegisteredSystem {
             index,
             batch: 0,
             callback: Box::new(callback),
-            commands: None,
+            commands,
         });
+        self.batches_dirty = true;
         index
     }
 
@@ -102,23 +103,19 @@ impl Schedule {
         self.prepare_batches();
         let accesses = &self.accesses;
         let mut pending = Vec::new();
+        let mut completed = Vec::<Result<_, ScheduleError>>::new();
         for batch in self.systems.chunk_by_mut(|a, b| a.batch == b.batch) {
             let declared = batch.iter().filter_map(|system| accesses.get(system.index));
             let scopes = world.scope_batch(declared)?;
-            let completed = batch
+            batch
                 .par_iter_mut()
                 .zip(scopes)
                 .map(|(system, scope)| {
-                    let commands = system.execute(
-                        scope,
-                        accesses
-                            .get(system.index)
-                            .is_some_and(SystemAccess::uses_commands),
-                    )?;
+                    let commands = system.execute(scope)?;
                     Ok((system, commands))
                 })
-                .collect::<Vec<Result<_, ScheduleError>>>();
-            for result in completed {
+                .collect_into_vec(&mut completed);
+            for result in completed.drain(..) {
                 let (system, commands) = result?;
                 if let Some(commands) = commands {
                     pending.push((system, commands));
@@ -141,6 +138,9 @@ impl Schedule {
     }
 
     fn prepare_batches(&mut self) {
+        if !self.batches_dirty {
+            return;
+        }
         let graph = ConflictGraph::new(&self.accesses);
         self.systems.sort_unstable_by_key(|system| system.index);
         for (number, batch) in graph.batches().enumerate() {
@@ -152,5 +152,6 @@ impl Schedule {
         }
         self.systems
             .sort_unstable_by_key(|system| (system.batch, system.index));
+        self.batches_dirty = false;
     }
 }
