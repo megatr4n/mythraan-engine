@@ -93,6 +93,9 @@ mod sealed {
 }
 
 /// A parameter type whose world access can be extracted before execution.
+///
+/// Parameter lists can be tuples of up to eight parameters. Tuple groups can
+/// be nested, and `()` declares a system with no parameters.
 pub trait SystemParam: sealed::Param {}
 
 impl<P: sealed::Param> SystemParam for P {}
@@ -133,3 +136,26 @@ impl sealed::Param for Commands<'_> {
         access.deferred_commands = true;
     }
 }
+
+impl sealed::Param for () {
+    fn record_access(_: &mut SystemAccess) {}
+}
+
+macro_rules! parameter_tuple {
+    ($($param:ident),+) => {
+        impl<$($param: SystemParam),+> sealed::Param for ($($param,)+) {
+            fn record_access(access: &mut SystemAccess) {
+                $($param::record_access(access);)+
+            }
+        }
+    };
+}
+
+parameter_tuple!(A);
+parameter_tuple!(A, B);
+parameter_tuple!(A, B, C);
+parameter_tuple!(A, B, C, D);
+parameter_tuple!(A, B, C, D, E);
+parameter_tuple!(A, B, C, D, E, F);
+parameter_tuple!(A, B, C, D, E, F, G);
+parameter_tuple!(A, B, C, D, E, F, G, H);

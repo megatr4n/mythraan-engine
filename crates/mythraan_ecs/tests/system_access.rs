@@ -153,3 +153,38 @@ fn commands_declare_deferred_access_and_leave_the_world_available_until_flush() 
     assert_eq!(world.get::<u32>(entity), Some(&15));
     assert_eq!(world.get::<bool>(entity), None);
 }
+
+#[test]
+fn parameter_lists_merge_access_and_keep_storage_kinds_distinct() {
+    type Parameters<'world> = (
+        Query<'world, &'world u32>,
+        QueryMut<'world, (&'world mut String, Option<&'world bool>)>,
+        (ResMut<'world, u32>, Res<'world, String>),
+        Commands<'world>,
+        Query<'world, &'world bool>,
+        (),
+    );
+    let access = SystemAccess::of::<Parameters<'_>>();
+    assert_eq!(
+        access.components().reads(),
+        &BTreeSet::from([TypeId::of::<u32>(), TypeId::of::<bool>()])
+    );
+    assert_eq!(
+        access.components().writes(),
+        &BTreeSet::from([TypeId::of::<String>()])
+    );
+    assert_eq!(
+        access.resources().reads(),
+        &BTreeSet::from([TypeId::of::<String>()])
+    );
+    assert_eq!(
+        access.resources().writes(),
+        &BTreeSet::from([TypeId::of::<u32>()])
+    );
+    assert!(access.uses_commands());
+}
+
+#[test]
+fn a_parameterless_system_declares_no_world_access() {
+    assert_eq!(SystemAccess::of::<()>(), SystemAccess::default());
+}
