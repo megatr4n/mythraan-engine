@@ -3,9 +3,11 @@
 use std::any::TypeId;
 
 use mythraan_ecs::prelude::{
-    FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess, With, World,
+    Changed, FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess, With, World,
 };
 use mythraan_ecs::{QueryError, ScopeError, StorageKind};
+use mythraan_math::glam::Vec3;
+use mythraan_math::transform::{GlobalTransform, Transform};
 
 #[test]
 fn scopes_share_reads_and_allow_disjoint_writes() {
@@ -191,4 +193,68 @@ fn scoped_queries_check_optional_and_filter_access_before_binding() {
         scope.components.query_mut::<(&u32, &mut u32)>().err(),
         Some(ScopeError::Query(QueryError { component: "u32" }))
     );
+}
+
+#[test]
+fn scoped_writes_track_changes_and_invalidate_transform_propagation() {
+    let mut world = World::new();
+    let root = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    world.insert(root, Transform::IDENTITY).unwrap();
+    world.insert(child, Transform::IDENTITY).unwrap();
+    world.set_parent(child, Some(root)).unwrap();
+    world.propagate_transforms().unwrap();
+    let checkpoint = world.change_tick();
+    world.advance_change_tick().unwrap();
+    let access = SystemAccess::of::<QueryMut<'_, &mut Transform>>();
+    {
+        let mut scopes = world.scope_batch([&access]).unwrap();
+        let scope = scopes.first_mut().unwrap();
+        scope
+            .components
+            .get_mut::<Transform>(root)
+            .unwrap()
+            .unwrap()
+            .translation = Vec3::X;
+        let mut changed = Vec::new();
+        scope
+            .components
+            .query_filtered_mut_since::<&Transform, Changed<Transform>>(checkpoint)
+            .unwrap()
+            .for_each(|entity, _| changed.push(entity));
+        assert_eq!(changed, [root]);
+    }
+
+    world.propagate_transforms().unwrap();
+    let propagated = world.get::<GlobalTransform>(child).unwrap();
+    assert_eq!(propagated.0.transform_point3(Vec3::ZERO), Vec3::X);
+}
+
+#[test]
+fn scoped_queries_only_mark_rows_yielded_by_the_filter() {
+    let mut world = World::new();
+    let matched = world.spawn().unwrap();
+    let skipped = world.spawn().unwrap();
+    for entity in [matched, skipped] {
+        world.insert(entity, 3_u32).unwrap();
+    }
+    world.insert(matched, true).unwrap();
+    let checkpoint = world.change_tick();
+    world.advance_change_tick().unwrap();
+    let access = SystemAccess::of::<FilteredQuery<'_, &mut u32, With<bool>>>();
+    {
+        let mut scopes = world.scope_batch([&access]).unwrap();
+        let scope = scopes.first_mut().unwrap();
+        scope
+            .components
+            .query_filtered_mut_since::<&mut u32, With<bool>>(checkpoint)
+            .unwrap()
+            .for_each(|_, value| *value += 1);
+    }
+    let mut changed = Vec::new();
+    world
+        .query_filtered_mut_since::<&u32, Changed<u32>>(checkpoint)
+        .unwrap()
+        .for_each(|entity, value| changed.push((entity, *value)));
+    assert_eq!(changed, [(matched, 4)]);
 }
