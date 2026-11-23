@@ -2,9 +2,9 @@ use std::any::{Any, TypeId, type_name};
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::component_storage::ComponentStorage;
-use crate::{Entity, EntityAllocError, EntityAllocator, SparseSet, WorldInsertError};
+use crate::{Entity, EntityAllocError, EntityAllocator, Resources, SparseSet, WorldInsertError};
 
-/// Owns the entities and their components in a simulation.
+/// Owns the entities, components, and shared resources in a simulation.
 ///
 /// Use entity identifiers with the world that issued them.
 ///
@@ -28,6 +28,7 @@ use crate::{Entity, EntityAllocError, EntityAllocator, SparseSet, WorldInsertErr
 pub struct World {
     entities: EntityAllocator,
     components: BTreeMap<TypeId, Box<dyn ComponentStorage>>,
+    resources: Resources,
 }
 
 impl World {
@@ -35,6 +36,28 @@ impl World {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Borrows the shared resources owned by this world.
+    #[must_use]
+    pub fn resources(&self) -> &Resources {
+        &self.resources
+    }
+
+    /// Mutably borrows the shared resources owned by this world.
+    ///
+    /// ```
+    /// use mythraan_ecs::prelude::World;
+    ///
+    /// struct Gravity(f32);
+    ///
+    /// let mut world = World::new();
+    /// world.resources_mut().insert(Gravity(9.81));
+    /// assert_eq!(world.resources().get::<Gravity>().map(|gravity| gravity.0), Some(9.81));
+    /// ```
+    #[must_use]
+    pub fn resources_mut(&mut self) -> &mut Resources {
+        &mut self.resources
     }
 
     /// Creates an entity with no components.
