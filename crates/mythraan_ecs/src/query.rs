@@ -22,13 +22,45 @@ mod sealed {
 }
 
 /// A supported shape of a read-only component query.
+///
+/// Use `&T` or a tuple of one to four shared component references.
 pub trait ReadQuery: sealed::Fetch {}
 
 impl<Q: sealed::Fetch> ReadQuery for Q {}
 
 /// An iterator over matching entity identifiers and shared component references.
 ///
-/// Iteration order is unspecified.
+/// A tuple query visits the smallest requested component storage and yields a
+/// row only when the entity has every requested component. Iteration order is
+/// unspecified.
+///
+/// ```
+/// use mythraan_ecs::prelude::World;
+///
+/// struct Position(i32);
+/// struct Health(u32);
+///
+/// let mut world = World::new();
+/// let entity = world.spawn()?;
+/// world.insert(entity, Position(12))?;
+/// world.insert(entity, Health(80))?;
+/// let mut query = world.query::<(&Position, &Health)>();
+/// let result = query.next().map(|(id, (pos, hp))| (id, pos.0, hp.0));
+/// assert_eq!(result, Some((entity, 12, 80)));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// A live query borrows the world, so the world cannot be mutated while the
+/// query is still in use.
+///
+/// ```compile_fail,E0502
+/// use mythraan_ecs::prelude::World;
+///
+/// let mut world = World::new();
+/// let mut query = world.query::<&u32>();
+/// let _ = world.spawn();
+/// let _ = query.next();
+/// ```
 pub struct Query<'world, Q: ReadQuery> {
     state: Option<Q::State<'world>>,
     candidates: Range<usize>,
