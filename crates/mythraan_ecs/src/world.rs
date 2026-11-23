@@ -13,6 +13,7 @@ use crate::{
 };
 
 mod transforms;
+use transforms::TransformPropagation;
 
 /// Owns the entities, components, and shared resources in a simulation.
 ///
@@ -40,6 +41,7 @@ pub struct World {
     resources: Resources,
     change_tick: NonZeroU64,
     hierarchy: Hierarchy,
+    transforms: TransformPropagation,
 }
 
 impl Default for World {
@@ -50,6 +52,7 @@ impl Default for World {
             resources: Resources::new(),
             change_tick: NonZeroU64::MIN,
             hierarchy: Hierarchy::default(),
+            transforms: TransformPropagation::default(),
         }
     }
 }
@@ -187,7 +190,8 @@ impl World {
         {
             return Err(HierarchyError::EntityNotAlive(parent));
         }
-        self.hierarchy.set_parent(child, parent)
+        self.transforms.rebuild |= self.hierarchy.set_parent(child, parent)?;
+        Ok(())
     }
 
     /// Returns whether this entity identifier is live in the world.
@@ -234,12 +238,14 @@ impl World {
         after_tick: u64,
     ) -> Result<QueryMut<'_, Q>, QueryError> {
         let tick = self.change_tick();
+        let transforms = &mut self.transforms;
         QueryMut::new(
             &self.entities,
             &mut self.components,
             F::requests(),
             after_tick,
             tick,
+            |id| transforms.invalidate(id),
         )
     }
 
@@ -257,6 +263,7 @@ impl World {
             return Err(WorldInsertError::EntityNotAlive { entity });
         }
         let tick = self.change_tick();
+        self.transforms.invalidate(TypeId::of::<T>());
 
         match self.components.entry(TypeId::of::<T>()) {
             Entry::Occupied(mut entry) => {
@@ -300,6 +307,7 @@ impl World {
     #[must_use]
     pub fn get_mut<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<&mut T> {
         let tick = self.change_tick();
+        self.transforms.invalidate(TypeId::of::<T>());
         self.storage_mut::<T>(entity)?.get_mut_at_tick(entity, tick)
     }
 
@@ -309,10 +317,14 @@ impl World {
     /// Removing a `Transform` also clears its derived `GlobalTransform`.
     pub fn remove<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<T> {
         let removed = self.storage_mut::<T>(entity)?.remove(entity)?;
-        if TypeId::of::<T>() == TypeId::of::<Transform>()
-            && let Some(storage) = self.storage_mut::<GlobalTransform>(entity)
-        {
-            storage.remove(entity);
+        let id = TypeId::of::<T>();
+        if id == TypeId::of::<Transform>() {
+            self.transforms.rebuild = true;
+            if let Some(storage) = self.storage_mut::<GlobalTransform>(entity) {
+                storage.remove(entity);
+            }
+        } else {
+            self.transforms.invalidate(id);
         }
         Some(removed)
     }

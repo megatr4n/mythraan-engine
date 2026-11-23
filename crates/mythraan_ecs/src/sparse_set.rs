@@ -144,6 +144,12 @@ impl<T> SparseSet<T> {
         self.values.get(self.dense_index(entity)?)
     }
 
+    pub(crate) fn get_with_change_tick(&self, entity: Entity) -> Option<(&T, u64)> {
+        let index = self.dense_index(entity)?;
+        let ticks = self.ticks.as_ref()?.get(index)?;
+        Some((self.values.get(index)?, ticks.changed()))
+    }
+
     /// Returns a mutable reference to the component for this entity in O(1) time.
     #[must_use]
     pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {

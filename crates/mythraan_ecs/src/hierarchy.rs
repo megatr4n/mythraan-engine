@@ -51,10 +51,10 @@ impl Hierarchy {
         &mut self,
         child: Entity,
         parent: Option<Entity>,
-    ) -> Result<(), HierarchyError> {
+    ) -> Result<bool, HierarchyError> {
         let old = self.parent(child).map(Parent::entity);
         if old == parent {
-            return Ok(());
+            return Ok(false);
         }
         if let Some(parent) = parent {
             let mut ancestor = Some(parent);
@@ -84,7 +84,7 @@ impl Hierarchy {
         if let Some(old) = old {
             self.unlink(old, child);
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) fn detach(&mut self, child: Entity) -> Option<Entity> {

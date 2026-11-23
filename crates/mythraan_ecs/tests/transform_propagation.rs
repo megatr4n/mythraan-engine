@@ -1,6 +1,6 @@
 //! World-space transforms through the public hierarchy API.
 
-use mythraan_ecs::prelude::World;
+use mythraan_ecs::prelude::{Changed, World};
 use mythraan_math::glam::{Quat, Vec3};
 use mythraan_math::transform::{GlobalTransform, Transform};
 
@@ -37,4 +37,45 @@ fn propagation_composes_parent_space_before_children() {
         Some(&root_transform.into())
     );
     assert!(world.get::<GlobalTransform>(group).is_none());
+}
+
+#[test]
+fn clean_passes_and_unaffected_transforms_preserve_change_ticks() {
+    let mut world = World::new();
+    let root = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    let unrelated = world.spawn().unwrap();
+    world.set_parent(child, Some(root)).unwrap();
+    for entity in [root, child, unrelated] {
+        world.insert(entity, Transform::IDENTITY).unwrap();
+    }
+    world.propagate_transforms().unwrap();
+
+    world.advance_change_tick().unwrap();
+    world.propagate_transforms().unwrap();
+    world
+        .query_filtered_mut::<&GlobalTransform, Changed<GlobalTransform>>()
+        .unwrap()
+        .for_each(|_, _| panic!("clean pass rewrote the cache"));
+
+    world.get_mut::<Transform>(root).unwrap().translation = Vec3::X;
+    world.propagate_transforms().unwrap();
+    let mut matches = Vec::new();
+    world
+        .query_filtered_mut::<&GlobalTransform, Changed<GlobalTransform>>()
+        .unwrap()
+        .for_each(|entity, _| matches.push(entity));
+    assert_eq!(matches.len(), 2);
+    assert!(matches.contains(&root) && matches.contains(&child));
+
+    world.get_mut::<Transform>(root).unwrap().translation = Vec3::Y;
+    world.propagate_transforms().unwrap();
+    assert_eq!(
+        world
+            .get::<GlobalTransform>(child)
+            .unwrap()
+            .0
+            .transform_point3(Vec3::ZERO),
+        Vec3::Y
+    );
 }

@@ -132,6 +132,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
         filters: Requests,
         after_tick: u64,
         tick: u64,
+        mut on_write: impl FnMut(TypeId),
     ) -> Result<Self, QueryError> {
         let requests = Q::requests();
         for (position, request) in requests.iter().enumerate() {
@@ -162,6 +163,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             };
             let (index, ticks, values) = storage.query_parts();
             let (shared, exclusive) = if request.access == Access::Write {
+                on_write(id);
                 (None, Some((values, tick)))
             } else {
                 (Some(&*values), None)
