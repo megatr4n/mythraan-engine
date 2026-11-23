@@ -4,7 +4,9 @@
 #![warn(missing_docs)]
 
 mod stage;
+mod time;
 
 pub mod prelude;
 
 pub use stage::Stage;
+pub use time::Time;

@@ -1,3 +1,3 @@
 //! Common application types.
 
-pub use crate::Stage;
+pub use crate::{Stage, Time};
