@@ -1,14 +1,19 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::mem;
 
 use mythraan_reflect::{ReflectFields, RegisterTypeError, TypeRegistry};
 
+use crate::change_detection::ComponentTicks;
 use crate::{Entity, ReflectComponentError, World};
 
 type ReadComponent = fn(&World, Entity) -> Option<&dyn ReflectFields>;
+type WriteComponent =
+    fn(&mut World, Entity) -> Option<(&mut dyn ReflectFields, Option<&ComponentTicks>)>;
 
 struct Access {
     read: ReadComponent,
+    write: WriteComponent,
 }
 
 #[derive(Default)]
@@ -35,6 +40,11 @@ impl World {
                     world
                         .get::<T>(entity)
                         .map(|component| component as &dyn ReflectFields)
+                },
+                write: |world, entity| {
+                    let (component, ticks) =
+                        world.storage_mut::<T>(entity)?.get_mut_with_ticks(entity)?;
+                    Some((component, ticks))
                 },
             });
         Ok(())
@@ -70,5 +80,45 @@ impl World {
         component
             .field(field)
             .ok_or_else(|| ReflectComponentError::UnknownField(field.to_owned()))
+    }
+
+    /// Replaces a named field and marks the component changed on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the type, component or field is unavailable,
+    /// or if the value has a different Rust type than the field.
+    pub fn set_reflected_field<V: Any>(
+        &mut self,
+        entity: Entity,
+        component: TypeId,
+        name: &str,
+        value: V,
+    ) -> Result<(), ReflectComponentError> {
+        let write = self
+            .reflected
+            .access
+            .get(&component)
+            .ok_or(ReflectComponentError::UnregisteredType(component))?
+            .write;
+        let tick = self.change_tick();
+        let (reflected, ticks) =
+            write(self, entity).ok_or(ReflectComponentError::MissingComponent(entity))?;
+        let field = reflected
+            .field_mut(name)
+            .ok_or_else(|| ReflectComponentError::UnknownField(name.to_owned()))?;
+        let Some(destination) = field.downcast_mut::<V>() else {
+            return Err(ReflectComponentError::TypeMismatch {
+                expected: Any::type_id(&*field),
+                actual: TypeId::of::<V>(),
+            });
+        };
+        let previous = mem::replace(destination, value);
+        if let Some(ticks) = ticks {
+            ticks.mark_changed(tick);
+        }
+        self.transforms.invalidate(component);
+        drop(previous);
+        Ok(())
     }
 }

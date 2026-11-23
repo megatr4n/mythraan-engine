@@ -158,12 +158,21 @@ impl<T> SparseSet<T> {
     }
 
     pub(crate) fn get_mut_at_tick(&mut self, entity: Entity, tick: u64) -> Option<&mut T> {
-        let index = self.dense_index(entity)?;
-        let value = self.values.get_mut(index)?;
-        if let Some(ticks) = self.ticks.as_ref().and_then(|ticks| ticks.get(index)) {
+        let (value, ticks) = self.get_mut_with_ticks(entity)?;
+        if let Some(ticks) = ticks {
             ticks.mark_changed(tick);
         }
         Some(value)
+    }
+
+    pub(crate) fn get_mut_with_ticks(
+        &mut self,
+        entity: Entity,
+    ) -> Option<(&mut T, Option<&ComponentTicks>)> {
+        let index = self.dense_index(entity)?;
+        let value = self.values.get_mut(index)?;
+        let ticks = self.ticks.as_ref().and_then(|ticks| ticks.get(index));
+        Some((value, ticks))
     }
 
     /// Removes and returns the component for this entity in O(1) time.

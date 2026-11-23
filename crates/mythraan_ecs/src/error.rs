@@ -23,6 +23,14 @@ pub enum ReflectComponentError {
     /// The component exposes no field with this name.
     #[error("component has no exposed field named {0:?}")]
     UnknownField(String),
+    /// The supplied value has a different Rust type than the field.
+    #[error("field expects type {expected:?} but received {actual:?}")]
+    TypeMismatch {
+        /// The field's actual type.
+        expected: TypeId,
+        /// The type of the replacement value.
+        actual: TypeId,
+    },
 }
 
 /// Invalid ordering or configuration for a schedule.
