@@ -162,6 +162,7 @@ impl World {
         if !self.is_alive(entity) {
             return Err(WorldInsertError::EntityNotAlive { entity });
         }
+        let tick = self.change_tick();
 
         match self.components.entry(TypeId::of::<T>()) {
             Entry::Occupied(mut entry) => {
@@ -171,11 +172,11 @@ impl World {
                         component: type_name::<T>(),
                     },
                 )?;
-                Ok(storage.insert(entity, component)?)
+                Ok(storage.insert_at_tick(entity, component, tick)?)
             }
             Entry::Vacant(entry) => {
-                let mut storage = SparseSet::new();
-                let previous = storage.insert(entity, component)?;
+                let mut storage = SparseSet::tracked();
+                let previous = storage.insert_at_tick(entity, component, tick)?;
                 entry.insert(Box::new(storage));
                 Ok(previous)
             }

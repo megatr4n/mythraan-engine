@@ -101,7 +101,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             let Some(slot) = columns.iter_mut().find(|column| column.is_none()) else {
                 break;
             };
-            let (index, values) = storage.query_parts();
+            let (index, _, values) = storage.query_parts();
             let (shared, exclusive) = if request.access == Access::Write {
                 (None, Some(values))
             } else {
