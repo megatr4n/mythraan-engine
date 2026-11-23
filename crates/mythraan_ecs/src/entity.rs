@@ -139,3 +139,50 @@ impl EntityAllocator {
             .is_some_and(|slot| slot.is_live(entity.generation))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Entity, EntityAllocator};
+
+    #[test]
+    fn rejects_an_index_outside_the_allocator() {
+        let mut entities = EntityAllocator::new();
+        let live = entities.spawn().unwrap();
+        let unknown = Entity {
+            index: u32::MAX,
+            ..live
+        };
+
+        assert!(!entities.is_alive(unknown));
+        assert!(!entities.despawn(unknown));
+        assert!(entities.is_alive(live));
+    }
+
+    #[test]
+    fn retires_a_slot_after_issuing_its_final_generation() {
+        let mut entities = EntityAllocator::new();
+        let original = entities.spawn().unwrap();
+        let other = entities.spawn().unwrap();
+        let penultimate = Entity {
+            generation: u32::MAX - 1,
+            ..original
+        };
+        entities.slots[original.index as usize].generation = penultimate.generation;
+
+        assert!(entities.despawn(penultimate));
+        let last = entities.spawn().unwrap();
+        assert_eq!(last.index(), original.index());
+        assert_eq!(last.generation(), u32::MAX);
+        assert!(entities.is_alive(last));
+        assert!(entities.despawn(other));
+        assert!(entities.despawn(last));
+
+        assert!(!entities.is_alive(last));
+        assert!(!entities.despawn(last));
+        let reused = entities.spawn().unwrap();
+        assert_eq!(reused.index(), other.index());
+        let fresh = entities.spawn().unwrap();
+        assert_ne!(fresh.index(), last.index());
+        assert!(!entities.is_alive(original));
+    }
+}
