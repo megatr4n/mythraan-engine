@@ -59,6 +59,9 @@ pub struct SystemFlush {
 /// ```
 /// use mythraan_ecs::prelude::{Commands, ResMut, Schedule, SystemAccess, World};
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// # rayon::ThreadPoolBuilder::new().num_threads(2)
+/// #     .build_scoped(|thread| thread.run(), |pool| pool.install(|| {
 /// let mut world = World::new();
 /// world.resources_mut().insert(0_u32);
 /// let mut schedule = Schedule::new();
@@ -79,7 +82,9 @@ pub struct SystemFlush {
 /// assert_eq!(world.resources().get::<u32>(), Some(&1));
 /// assert_eq!(world.query::<&bool>().count(), 1);
 /// assert!(reports.iter().all(|entry| entry.report.failures().is_empty()));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # Ok(())
+/// # }))?
+/// # }
 /// ```
 #[derive(Default)]
 pub struct Schedule {

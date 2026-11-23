@@ -1,5 +1,9 @@
 //! Conflict-aware execution through the public schedule API.
 
+mod common;
+
+use common::scoped_pool;
+
 use std::any::TypeId;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
@@ -30,7 +34,11 @@ fn conflicting_systems_see_writes_in_registration_order() {
         Ok(())
     });
 
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(world.resources().get::<u32>(), Some(&6));
 }
 
@@ -74,7 +82,7 @@ fn commands_flush_once_in_registration_order_even_across_batches() {
         Ok(())
     });
 
-    let reports = schedule.run(&mut world).unwrap();
+    let reports = scoped_pool(2, || schedule.run(&mut world)).unwrap();
     assert_eq!(
         reports.iter().map(|entry| entry.system).collect::<Vec<_>>(),
         [0, 1, 2]
@@ -111,7 +119,7 @@ fn a_failed_command_reports_its_system_and_does_not_prevent_later_commands() {
         Ok(())
     });
 
-    let reports = schedule.run(&mut world).unwrap();
+    let reports = scoped_pool(2, || schedule.run(&mut world)).unwrap();
     let [first, second] = reports.as_slice() else {
         panic!("expected reports for two command queues")
     };
@@ -174,12 +182,8 @@ fn independent_systems_overlap_and_a_dependent_system_waits_for_both() {
         },
     );
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(2)
-        .build()
-        .unwrap();
     assert!(
-        pool.install(|| schedule.run(&mut world))
+        scoped_pool(2, || schedule.run(&mut world))
             .unwrap()
             .is_empty()
     );
@@ -209,9 +213,17 @@ fn repeated_runs_keep_callback_state_and_new_systems_rebuild_the_batches() {
         *flag = !*flag;
         Ok(())
     });
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(world.resources().get::<u32>(), Some(&4));
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(world.resources().get::<u32>(), Some(&12));
 
     let reader = schedule.add_system(
@@ -223,7 +235,11 @@ fn repeated_runs_keep_callback_state_and_new_systems_rebuild_the_batches() {
         },
     );
     assert_eq!(reader, 3);
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -257,7 +273,7 @@ fn a_system_error_discards_pending_commands_without_rolling_back_direct_writes()
     });
 
     assert_eq!(
-        schedule.run(&mut world).unwrap_err(),
+        scoped_pool(2, || schedule.run(&mut world)).unwrap_err(),
         ScheduleError::System {
             system: failing,
             source: ScopeError::UndeclaredAccess {
@@ -269,7 +285,11 @@ fn a_system_error_discards_pending_commands_without_rolling_back_direct_writes()
     );
     assert_eq!(world.resources().get::<u32>(), Some(&1));
     assert!(world.get::<bool>(target).is_none());
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(world.resources().get::<u32>(), Some(&2));
     assert!(world.get::<bool>(target).is_none());
 }
@@ -289,9 +309,17 @@ fn a_panicking_system_cannot_replay_its_commands_on_retry() {
         commands.insert(target, 7_u32);
         Ok(())
     });
-    assert!(catch_unwind(AssertUnwindSafe(|| schedule.run(&mut world))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(
+            || scoped_pool(2, || schedule.run(&mut world))
+        ))
+        .is_err()
+    );
     assert!(world.get::<bool>(target).is_none());
-    assert_eq!(schedule.run(&mut world).unwrap().len(), 1);
+    assert_eq!(
+        scoped_pool(2, || schedule.run(&mut world)).unwrap().len(),
+        1
+    );
     assert_eq!(world.get::<u32>(target), Some(&7));
     assert!(world.get::<bool>(target).is_none());
 }

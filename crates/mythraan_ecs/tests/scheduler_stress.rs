@@ -1,5 +1,9 @@
 //! Repeated conflicting and compatible schedules checked against serial results.
 
+mod common;
+
+use common::scoped_pool;
+
 use mythraan_ecs::prelude::{Commands, Entity, QueryMut, Res, Schedule, SystemAccess, World};
 
 const FRAME_COUNT: u64 = if cfg!(miri) { 10 } else { 64 };
@@ -103,10 +107,6 @@ fn check_frames() {
 #[test]
 fn cached_parallel_batches_match_serial_values_and_command_order() {
     for workers in [2, 4] {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(workers)
-            .build()
-            .unwrap();
-        pool.install(check_frames);
+        scoped_pool(workers, check_frames);
     }
 }

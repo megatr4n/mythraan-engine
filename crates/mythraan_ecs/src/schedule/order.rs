@@ -7,6 +7,9 @@ use crate::ScheduleConfigError;
 /// ```
 /// use mythraan_ecs::prelude::{ResMut, Schedule, SystemAccess, SystemOrder, World};
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// # rayon::ThreadPoolBuilder::new().num_threads(2)
+/// #     .build_scoped(|thread| thread.run(), |pool| pool.install(|| {
 /// let mut schedule = Schedule::new();
 /// let access = SystemAccess::of::<ResMut<'_, u32>>();
 /// let finish = schedule.add_system(access.clone(), |mut scope, _| {
@@ -27,7 +30,9 @@ use crate::ScheduleConfigError;
 /// world.resources_mut().insert(0_u32);
 /// assert!(schedule.run(&mut world)?.is_empty());
 /// assert_eq!(world.resources().get::<u32>(), Some(&11));
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # Ok(())
+/// # }))?
+/// # }
 /// ```
 #[derive(Default)]
 pub struct SystemOrder {

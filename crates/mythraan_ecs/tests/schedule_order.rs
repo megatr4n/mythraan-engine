@@ -1,5 +1,9 @@
 //! Ordering and conditional execution for schedules.
 
+mod common;
+
+use common::scoped_pool;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -39,8 +43,7 @@ fn generic_stages_keep_insertion_order_and_flush_between_schedules() {
     let mut visited = Vec::new();
     for (label, schedule) in stages.iter_mut() {
         assert!(
-            schedule
-                .run(&mut world)
+            scoped_pool(2, || schedule.run(&mut world))
                 .unwrap()
                 .iter()
                 .all(|run| run.report.failures().is_empty())
@@ -76,7 +79,11 @@ fn explicit_order_overrides_conflict_defaults_and_invalid_order_is_atomic() {
         schedule.configure_order(order.before(first, second)),
         Err(ScheduleConfigError::Cycle)
     );
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(world.resources().get::<Vec<u8>>().unwrap(), &[2, 1]);
 }
 
@@ -108,7 +115,11 @@ fn named_sets_order_independent_systems_and_accept_overlapping_memberships() {
         .before("writers", "readers")
         .after(reader, "first");
     schedule.configure_order(&order).unwrap();
-    assert!(schedule.run(&mut World::new()).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut World::new()))
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -161,9 +172,13 @@ fn run_conditions_see_predecessor_writes_and_skipped_systems_queue_nothing() {
         Err(ScheduleConfigError::UnknownSystem(usize::MAX))
     );
 
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert!(world.get::<u8>(entity).is_none());
-    let reports = schedule.run(&mut world).unwrap();
+    let reports = scoped_pool(2, || schedule.run(&mut world)).unwrap();
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].system, target);
     assert_eq!(world.get::<u8>(entity), Some(&7));
@@ -189,12 +204,24 @@ fn run_conditions_in_one_batch_share_the_state_before_its_systems_run() {
             world.resources().get::<bool>() == Some(&true)
         })
         .unwrap();
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(runs.load(Ordering::SeqCst), 0);
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(runs.load(Ordering::SeqCst), 1);
     schedule.run_if(target, |_| false).unwrap();
-    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(
+        scoped_pool(2, || schedule.run(&mut world))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(runs.load(Ordering::SeqCst), 1);
 }
 
@@ -217,7 +244,7 @@ fn reordered_systems_still_flush_commands_in_registration_order() {
     schedule
         .configure_order(SystemOrder::new().before(second, first))
         .unwrap();
-    let reports = schedule.run(&mut world).unwrap();
+    let reports = scoped_pool(2, || schedule.run(&mut world)).unwrap();
     assert_eq!(
         reports
             .iter()
