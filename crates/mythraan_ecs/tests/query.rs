@@ -46,3 +46,24 @@ fn pair_query_joins_components_by_entity() {
     assert_eq!(values, [(first, 40, 11), (second, 80, 22)]);
     assert_eq!(world.query::<(&Position, &Health)>().count(), 2);
 }
+
+#[derive(Debug, PartialEq, Eq)]
+struct Speed(i32);
+
+#[test]
+fn triple_query_checks_every_required_component() {
+    let mut world = World::new();
+    let complete = world.spawn().unwrap();
+    let partial = world.spawn().unwrap();
+    world.insert(complete, Health(42)).unwrap();
+    world.insert(complete, Position(21)).unwrap();
+    world.insert(complete, Speed(7)).unwrap();
+    world.insert(partial, Health(50)).unwrap();
+    world.insert(partial, Speed(8)).unwrap();
+
+    let values: Vec<_> = world.query::<(&Speed, &Health, &Position)>().collect();
+    assert_eq!(
+        values,
+        [(complete, (&Speed(7), &Health(42), &Position(21)))]
+    );
+}
