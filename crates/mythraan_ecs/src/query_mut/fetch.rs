@@ -1,6 +1,6 @@
 use std::any::TypeId;
 
-use super::{Access, Columns, Request, Requests};
+use super::{Access, Columns, Request, Requests, requests};
 use crate::Entity;
 use crate::sparse_set::SparseIndex;
 
@@ -84,7 +84,7 @@ impl<T: Field> Fetch for T {
     type State<'world> = T::State<'world>;
     type Item<'row> = T::Item<'row>;
     fn requests() -> Requests {
-        [Some(T::request()), None, None, None]
+        requests([T::request()])
     }
     fn prepare<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>> {
         T::bind(columns)
@@ -100,11 +100,7 @@ macro_rules! tuple {
             type State<'world> = ($($field::State<'world>,)+);
             type Item<'row> = ($($field::Item<'row>,)+);
             fn requests() -> Requests {
-                let mut requests: Requests = [const { None }; 4];
-                for (slot, request) in requests.iter_mut().zip([$($field::request()),+]) {
-                    *slot = Some(request);
-                }
-                requests
+                requests([$($field::request()),+])
             }
             fn prepare<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>> {
                 Some(($($field::bind(columns)?,)+))

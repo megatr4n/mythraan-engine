@@ -6,12 +6,16 @@ use crate::sparse_set::SparseIndex;
 use crate::{Entity, EntityAllocator, QueryError};
 
 mod fetch;
+mod filters;
+pub use filters::{With, Without};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Access {
     Read,
     Optional,
     Write,
+    With,
+    Without,
 }
 
 pub struct Request {
@@ -37,8 +41,13 @@ pub struct Column<'world> {
     exclusive: Option<&'world mut (dyn Any + Send + Sync)>,
 }
 
-type Columns<'world> = [Option<Column<'world>>; 4];
+type Columns<'world> = [Option<Column<'world>>; 8];
 type Requests = [Option<Request>; 4];
+
+fn requests(input: impl IntoIterator<Item = Request>) -> Requests {
+    let mut input = input.into_iter();
+    std::array::from_fn(|_| input.next())
+}
 
 /// A supported data shape for a query that borrows the world exclusively.
 ///
@@ -46,10 +55,15 @@ type Requests = [Option<Request>; 4];
 pub trait WriteQuery: fetch::Fetch {}
 impl<Q: fetch::Fetch> WriteQuery for Q {}
 
+/// A presence filter or conjunction of up to four presence filters.
+pub trait QueryFilter: filters::Filter {}
+impl<F: filters::Filter> QueryFilter for F {}
+
 /// Visits each matching entity with the component borrows requested by the query.
 pub struct QueryMut<'world, Q: WriteQuery> {
     entities: &'world EntityAllocator,
     candidates: Option<&'world [Entity]>,
+    filters: [Option<(SparseIndex<'world>, bool)>; 4],
     state: Option<Q::State<'world>>,
 }
 
@@ -57,6 +71,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
     pub(crate) fn new(
         entities: &'world EntityAllocator,
         storages: &'world mut BTreeMap<TypeId, Box<dyn ComponentStorage>>,
+        filters: Requests,
     ) -> Result<Self, QueryError> {
         let requests = Q::requests();
         for (position, request) in requests.iter().enumerate() {
@@ -71,9 +86,10 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             }
         }
 
-        let mut columns: Columns<'world> = [const { None }; 4];
+        let requested = || requests.iter().chain(&filters).flatten();
+        let mut columns: Columns<'world> = [const { None }; 8];
         for (&id, storage) in storages.iter_mut() {
-            let Some(request) = requests.iter().flatten().find(|request| request.id == id) else {
+            let Some(request) = requested().find(|request| request.id == id) else {
                 continue;
             };
             let Some(slot) = columns.iter_mut().find(|column| column.is_none()) else {
@@ -93,16 +109,18 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             });
         }
 
-        let candidates = requests
-            .iter()
-            .flatten()
-            .filter(|request| request.access != Access::Optional)
+        let candidates = requested()
+            .filter(|request| !matches!(request.access, Access::Optional | Access::Without))
             .map(|request| index_of(&columns, request.id).entities())
             .min_by_key(|source| source.len());
+        let filters = filters.map(|filter| {
+            filter.map(|filter| (index_of(&columns, filter.id), filter.access == Access::With))
+        });
         let state = Q::prepare(&mut columns);
         Ok(Self {
             entities,
             candidates,
+            filters,
             state,
         })
     }
@@ -113,7 +131,13 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             return;
         };
         let visit_entity = |entity| {
-            if let Some(item) = Q::get(state, entity) {
+            if self
+                .filters
+                .iter()
+                .flatten()
+                .all(|(index, present)| index.position(entity).is_some() == *present)
+                && let Some(item) = Q::get(state, entity)
+            {
                 visit(entity, item);
             }
         };

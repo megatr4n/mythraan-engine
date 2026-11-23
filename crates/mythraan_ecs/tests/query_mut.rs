@@ -1,11 +1,52 @@
 //! Mutable query behavior through the public ECS API.
 
-use mythraan_ecs::prelude::World;
+use mythraan_ecs::prelude::{With, Without, World};
 
 #[derive(Debug, PartialEq, Eq)]
 struct Position(i32);
 
 struct Velocity(i32);
+
+struct Player;
+struct Frozen;
+
+#[test]
+fn combined_filters_update_only_matching_entities() {
+    let mut world = World::new();
+    let moving = world.spawn().unwrap();
+    let frozen = world.spawn().unwrap();
+    let other = world.spawn().unwrap();
+    for entity in [moving, frozen, other] {
+        world.insert(entity, Position(10)).unwrap();
+    }
+    world.insert(moving, Player).unwrap();
+    world.insert(frozen, Player).unwrap();
+    world.insert(frozen, Frozen).unwrap();
+
+    world
+        .query_filtered_mut::<&mut Position, (With<Player>, Without<Frozen>)>()
+        .unwrap()
+        .for_each(|_, position| {
+            position.0 += 1;
+        });
+    assert_eq!(world.get::<Position>(moving), Some(&Position(11)));
+    assert_eq!(world.get::<Position>(frozen), Some(&Position(10)));
+    assert_eq!(world.get::<Position>(other), Some(&Position(10)));
+}
+
+#[test]
+fn checking_presence_does_not_conflict_with_mutation() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Position(7)).unwrap();
+    world
+        .query_filtered_mut::<&mut Position, With<Position>>()
+        .unwrap()
+        .for_each(|_, position| {
+            position.0 += 1;
+        });
+    assert_eq!(world.get::<Position>(entity), Some(&Position(8)));
+}
 
 #[test]
 fn updates_only_entities_with_every_required_component() {

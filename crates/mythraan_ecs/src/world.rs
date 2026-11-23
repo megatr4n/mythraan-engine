@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::component_storage::ComponentStorage;
 use crate::{
-    Entity, EntityAllocError, EntityAllocator, Query, QueryError, QueryMut, ReadQuery, Resources,
-    SparseSet, WorldInsertError, WriteQuery,
+    Entity, EntityAllocError, EntityAllocator, Query, QueryError, QueryFilter, QueryMut, ReadQuery,
+    Resources, SparseSet, WorldInsertError, WriteQuery,
 };
 
 /// Owns the entities, components, and shared resources in a simulation.
@@ -106,7 +106,18 @@ impl World {
     /// Returns a conflict if a component is requested more than once and at
     /// least one request is mutable.
     pub fn query_mut<Q: WriteQuery>(&mut self) -> Result<QueryMut<'_, Q>, QueryError> {
-        QueryMut::new(&self.entities, &mut self.components)
+        self.query_filtered_mut::<Q, ()>()
+    }
+
+    /// Prepares a query restricted by the component presence filters in `F`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same access conflict as [`Self::query_mut`].
+    pub fn query_filtered_mut<Q: WriteQuery, F: QueryFilter>(
+        &mut self,
+    ) -> Result<QueryMut<'_, Q>, QueryError> {
+        QueryMut::new(&self.entities, &mut self.components, F::requests())
     }
 
     /// Inserts a component and returns the previous value of the same type, if any.

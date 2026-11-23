@@ -17,7 +17,7 @@ mod world;
 pub use entity::{Entity, EntityAllocator};
 pub use error::{EntityAllocError, QueryError, SparseSetError, WorldInsertError};
 pub use query::{Query, ReadQuery};
-pub use query_mut::{QueryMut, WriteQuery};
+pub use query_mut::{QueryFilter, QueryMut, With, Without, WriteQuery};
 pub use resources::Resources;
 pub use sparse_set::SparseSet;
 pub use world::World;
