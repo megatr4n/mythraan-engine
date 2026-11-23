@@ -220,3 +220,38 @@ fn propagation_repairs_edited_or_removed_derived_values() {
     world.propagate_transforms().unwrap();
     assert_eq!(origin(&world, entity), Vec3::X);
 }
+
+#[test]
+fn propagation_handles_a_deep_chain_from_root_to_leaf() {
+    const DEPTH: u16 = 16_384;
+    let mut world = World::new();
+    let leaf = world.spawn().unwrap();
+    let mut root = leaf;
+    let mut chain = vec![leaf];
+    for _ in 1..DEPTH {
+        let parent = world.spawn().unwrap();
+        world.set_parent(root, Some(parent)).unwrap();
+        chain.push(parent);
+        root = parent;
+    }
+
+    world.propagate_transforms().unwrap();
+    assert_eq!(world.query::<&GlobalTransform>().count(), 0);
+    for entity in chain {
+        world
+            .insert(
+                entity,
+                Transform {
+                    translation: Vec3::X,
+                    ..Transform::IDENTITY
+                },
+            )
+            .unwrap();
+    }
+
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, leaf), Vec3::X * f32::from(DEPTH));
+    world.get_mut::<Transform>(root).unwrap().translation = Vec3::X * 2.0;
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, leaf), Vec3::X * (f32::from(DEPTH) + 1.0));
+}

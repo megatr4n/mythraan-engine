@@ -28,6 +28,7 @@ impl World {
     ///
     /// Call at a sync point after editing local transforms and parent links.
     /// Entities without a local transform forward their parent's transform.
+    /// Clean passes reuse the cached world-space transforms.
     ///
     /// # Errors
     /// Returns an error if a derived component cannot be stored.
@@ -57,10 +58,16 @@ impl World {
     ) -> Result<(), WorldInsertError> {
         let rebuild = self.transforms.rebuild;
         let checkpoint = self.transforms.last_tick;
-        let standalone = self
+        let Some(locals) = self
             .storage::<Transform>()
-            .into_iter()
-            .flat_map(|storage| storage.entities().iter().copied())
+            .filter(|storage| !storage.is_empty())
+        else {
+            return Ok(());
+        };
+        let standalone = locals
+            .entities()
+            .iter()
+            .copied()
             .filter(|&entity| self.parent(entity).is_none() && self.children(entity).is_none());
         pending.extend(
             self.hierarchy
