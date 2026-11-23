@@ -22,6 +22,9 @@ pub enum StorageKind {
 /// A batch or system requested incompatible storage access.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ScopeError {
+    /// A query requests aliased component access.
+    #[error(transparent)]
+    Query(#[from] QueryError),
     /// Multiple systems requested access to a type with an exclusive borrower.
     #[error("conflicting batch access to {storage:?} {type_id:?}")]
     BatchConflict {

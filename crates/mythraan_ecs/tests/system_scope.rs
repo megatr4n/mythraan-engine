@@ -2,8 +2,10 @@
 
 use std::any::TypeId;
 
-use mythraan_ecs::prelude::{Query, QueryMut, Res, ResMut, SystemAccess, World};
-use mythraan_ecs::{ScopeError, StorageKind};
+use mythraan_ecs::prelude::{
+    FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess, With, World,
+};
+use mythraan_ecs::{QueryError, ScopeError, StorageKind};
 
 #[test]
 fn scopes_share_reads_and_allow_disjoint_writes() {
@@ -88,4 +90,105 @@ fn conflicting_declarations_are_rejected_even_for_missing_storage() {
     assert_eq!(world.scope_batch([&read, &write]).err(), expected);
     assert_eq!(world.scope_batch([&write, &read]).err(), expected);
     assert_eq!(world.scope_batch([&write, &write]).err(), expected);
+}
+
+#[test]
+fn scoped_queries_bind_shared_and_exclusive_columns() {
+    type Writer<'world> = (
+        QueryMut<'world, (&'world u32, &'world mut i32)>,
+        ResMut<'world, i32>,
+    );
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, 5_u32).unwrap();
+    world.insert(entity, 6_i32).unwrap();
+    world.resources_mut().insert(7_i32);
+    let writer = SystemAccess::of::<Writer<'_>>();
+    let reader = SystemAccess::of::<Query<'_, &u32>>();
+    {
+        let mut scopes = world.scope_batch([&writer, &reader]).unwrap();
+        let [writer, reader] = scopes.as_mut_slice() else {
+            panic!("expected two scopes")
+        };
+        let mut bonus = writer.resources.get_mut::<i32>().unwrap().unwrap();
+        writer
+            .components
+            .query_mut::<(&u32, &mut i32)>()
+            .unwrap()
+            .for_each(|matched, (shared, value)| {
+                assert_eq!(matched, entity);
+                *value += *shared as i32 + *bonus;
+                *bonus += 1;
+            });
+        reader
+            .components
+            .query_mut::<&u32>()
+            .unwrap()
+            .for_each(|matched, value| {
+                assert_eq!((matched, *value), (entity, 5));
+            });
+    }
+    assert_eq!(world.get::<i32>(entity), Some(&18));
+    assert_eq!(world.resources().get::<i32>(), Some(&8));
+}
+
+#[test]
+fn scoped_queries_check_optional_and_filter_access_before_binding() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, 7_u32).unwrap();
+    let read = SystemAccess::of::<Query<'_, &u32>>();
+    let write = SystemAccess::of::<QueryMut<'_, &mut u32>>();
+    let filtered = SystemAccess::of::<FilteredQuery<'_, (&u32, Option<&bool>), With<i32>>>();
+
+    let mut scopes = world.scope_batch([&read, &filtered]).unwrap();
+    let [read, filtered] = scopes.as_mut_slice() else {
+        panic!("expected two scopes")
+    };
+    let undeclared = Some(ScopeError::UndeclaredAccess {
+        storage: StorageKind::Component,
+        type_id: TypeId::of::<bool>(),
+        write: false,
+    });
+    assert_eq!(
+        read.components.query_mut::<(&u32, Option<&bool>)>().err(),
+        undeclared
+    );
+    assert_eq!(
+        read.components
+            .query_filtered_mut_since::<&u32, With<bool>>(0)
+            .err(),
+        undeclared
+    );
+    assert_eq!(
+        read.components.query_mut::<&mut u32>().err(),
+        Some(ScopeError::UndeclaredAccess {
+            storage: StorageKind::Component,
+            type_id: TypeId::of::<u32>(),
+            write: true,
+        })
+    );
+    let mut matches = Vec::new();
+    filtered
+        .components
+        .query_mut::<(&u32, Option<&bool>)>()
+        .unwrap()
+        .for_each(|_, (value, optional)| {
+            matches.push((*value, optional.copied()));
+        });
+    assert_eq!(matches, [(7, None)]);
+    filtered
+        .components
+        .query_filtered_mut_since::<&u32, With<i32>>(0)
+        .unwrap()
+        .for_each(|_, _| {
+            panic!("missing filter storage must produce no matches");
+        });
+
+    let mut scopes = world.scope_batch([&write]).unwrap();
+    let scope = scopes.first_mut().unwrap();
+    assert_eq!(
+        scope.components.query_mut::<(&u32, &mut u32)>().err(),
+        Some(ScopeError::Query(QueryError { component: "u32" }))
+    );
 }

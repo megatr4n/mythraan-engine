@@ -5,8 +5,10 @@ use std::ops::Bound::{self, Included, Unbounded};
 use crate::change_detection::ComponentTicks;
 use crate::component_storage::ComponentStorage;
 use crate::sparse_set::SparseIndex;
-use crate::world::Borrowed;
-use crate::{Entity, EntityAllocator, QueryError, SystemAccess, World};
+use crate::world::{Borrowed, ensure_access};
+use crate::{
+    AccessSet, Entity, EntityAllocator, QueryError, ScopeError, StorageKind, SystemAccess, World,
+};
 
 mod fetch;
 mod filters;
@@ -80,6 +82,21 @@ pub(crate) fn record_filter_access<F: QueryFilter>(access: &mut SystemAccess) {
     for request in F::requests().into_iter().flatten() {
         access.read_component(request.id);
     }
+}
+
+pub(crate) fn validate_access<Q: WriteQuery>(
+    access: &AccessSet,
+    filters: &Requests,
+) -> Result<(), ScopeError> {
+    for request in Q::requests().iter().chain(filters).flatten() {
+        ensure_access(
+            access,
+            StorageKind::Component,
+            request.id,
+            request.access == Access::Write,
+        )?;
+    }
+    Ok(())
 }
 
 /// An exclusive world query that retains its filter type in system declarations.

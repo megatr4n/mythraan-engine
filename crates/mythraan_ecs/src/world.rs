@@ -14,7 +14,7 @@ use crate::{
 
 mod scope;
 mod transforms;
-pub(crate) use scope::Borrowed;
+pub(crate) use scope::{Borrowed, ensure_access};
 pub use scope::{ScopedComponents, ScopedResources, SystemScope};
 use transforms::TransformPropagation;
 

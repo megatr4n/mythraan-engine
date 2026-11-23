@@ -3,7 +3,11 @@ use std::collections::BTreeMap;
 
 use super::World;
 use crate::component_storage::ComponentStorage;
-use crate::{AccessSet, Entity, Res, ResMut, ScopeError, SparseSet, StorageKind, SystemAccess};
+use crate::query_mut::validate_access;
+use crate::{
+    AccessSet, Entity, EntityAllocator, QueryFilter, QueryMut, Res, ResMut, ScopeError, SparseSet,
+    StorageKind, SystemAccess, WriteQuery,
+};
 
 /// A system's borrowed storage for one batch.
 pub struct SystemScope<'world> {
@@ -16,6 +20,7 @@ pub struct SystemScope<'world> {
 /// Component access restricted to one system's declarations.
 pub struct ScopedComponents<'world> {
     access: &'world AccessSet,
+    entities: &'world EntityAllocator,
     stores: Stores<'world, dyn ComponentStorage>,
     tick: u64,
 }
@@ -27,7 +32,7 @@ impl ScopedComponents<'_> {
     /// Returns an error if the system has no access to the type.
     pub fn get<T: Send + Sync + 'static>(&self, entity: Entity) -> Result<Option<&T>, ScopeError> {
         let id = TypeId::of::<T>();
-        ensure(self.access, StorageKind::Component, id, false)?;
+        ensure_access(self.access, StorageKind::Component, id, false)?;
         Ok(self.stores.get(&id).and_then(|store| {
             let erased: &dyn Any = store.get();
             erased.downcast_ref::<SparseSet<T>>()?.get(entity)
@@ -43,13 +48,45 @@ impl ScopedComponents<'_> {
         entity: Entity,
     ) -> Result<Option<&mut T>, ScopeError> {
         let id = TypeId::of::<T>();
-        ensure(self.access, StorageKind::Component, id, true)?;
+        ensure_access(self.access, StorageKind::Component, id, true)?;
         Ok(self.stores.get_mut(&id).and_then(|store| {
             let erased: &mut dyn Any = store.get_mut()?;
             erased
                 .downcast_mut::<SparseSet<T>>()?
                 .get_mut_at_tick(entity, self.tick)
         }))
+    }
+
+    /// Prepares a query using the system's declared component access.
+    ///
+    /// # Errors
+    /// Returns an error for undeclared or aliased access.
+    pub fn query_mut<Q: WriteQuery>(&mut self) -> Result<QueryMut<'_, Q>, ScopeError> {
+        self.query_filtered_mut_since::<Q, ()>(self.tick - 1)
+    }
+
+    /// Prepares a query whose change filters match ticks after `after_tick`.
+    ///
+    /// # Errors
+    /// Returns an error for undeclared or aliased access in the data or filters.
+    pub fn query_filtered_mut_since<Q: WriteQuery, F: QueryFilter>(
+        &mut self,
+        after_tick: u64,
+    ) -> Result<QueryMut<'_, Q>, ScopeError> {
+        let filters = F::requests();
+        validate_access::<Q>(self.access, &filters)?;
+        Ok(QueryMut::new(
+            self.entities,
+            |bounds| {
+                self.stores
+                    .range_mut(bounds)
+                    .map(|(&id, store)| (id, store.reborrow()))
+            },
+            filters,
+            after_tick,
+            self.tick,
+            |_| {},
+        )?)
     }
 }
 
@@ -66,7 +103,7 @@ impl ScopedResources<'_> {
     /// Returns an error if the system has no access to the type.
     pub fn get<T: Send + Sync + 'static>(&self) -> Result<Option<Res<'_, T>>, ScopeError> {
         let id = TypeId::of::<T>();
-        ensure(self.access, StorageKind::Resource, id, false)?;
+        ensure_access(self.access, StorageKind::Resource, id, false)?;
         Ok(self
             .stores
             .get(&id)
@@ -82,7 +119,7 @@ impl ScopedResources<'_> {
         &mut self,
     ) -> Result<Option<ResMut<'_, T>>, ScopeError> {
         let id = TypeId::of::<T>();
-        ensure(self.access, StorageKind::Resource, id, true)?;
+        ensure_access(self.access, StorageKind::Resource, id, true)?;
         Ok(self
             .stores
             .get_mut(&id)
@@ -128,6 +165,7 @@ impl World {
                 SystemScope {
                     components: ScopedComponents {
                         access: access.components(),
+                        entities: &self.entities,
                         stores: components,
                         tick,
                     },
@@ -141,7 +179,7 @@ impl World {
     }
 }
 
-fn ensure(
+pub(crate) fn ensure_access(
     access: &AccessSet,
     storage: StorageKind,
     type_id: TypeId,
@@ -164,6 +202,13 @@ pub(crate) enum Borrowed<'world, T: ?Sized> {
 }
 
 impl<'world, T: ?Sized> Borrowed<'world, T> {
+    fn reborrow(&mut self) -> Borrowed<'_, T> {
+        match self {
+            Self::Shared(value) => Borrowed::Shared(value),
+            Self::Exclusive(value) => Borrowed::Exclusive(value),
+        }
+    }
+
     fn get(&self) -> &T {
         match self {
             Self::Shared(value) => value,
