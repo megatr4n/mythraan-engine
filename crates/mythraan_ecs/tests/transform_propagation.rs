@@ -157,3 +157,66 @@ fn mutable_queries_and_flushed_commands_invalidate_cached_transforms() {
     world.propagate_transforms().unwrap();
     assert_eq!(origin(&world, entity), Vec3::Y);
 }
+
+#[test]
+fn removing_a_local_transform_drops_its_cache_and_updates_descendants() {
+    let mut world = World::new();
+    let parent = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    world.set_parent(child, Some(parent)).unwrap();
+    world
+        .insert(
+            parent,
+            Transform {
+                translation: Vec3::Z,
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+    world
+        .insert(
+            child,
+            Transform {
+                translation: Vec3::Y,
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, child), Vec3::Y + Vec3::Z);
+
+    assert!(world.remove::<Transform>(parent).is_some());
+    assert!(world.get::<GlobalTransform>(parent).is_none());
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, child), Vec3::Y);
+    assert!(world.get::<GlobalTransform>(parent).is_none());
+}
+
+#[test]
+fn propagation_repairs_edited_or_removed_derived_values() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world
+        .insert(
+            entity,
+            Transform {
+                translation: Vec3::X,
+                ..Transform::IDENTITY
+            },
+        )
+        .unwrap();
+    world.propagate_transforms().unwrap();
+
+    world
+        .query_mut::<&mut GlobalTransform>()
+        .unwrap()
+        .for_each(|_, global| {
+            *global = GlobalTransform::IDENTITY;
+        });
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, entity), Vec3::X);
+
+    assert!(world.remove::<GlobalTransform>(entity).is_some());
+    world.propagate_transforms().unwrap();
+    assert_eq!(origin(&world, entity), Vec3::X);
+}

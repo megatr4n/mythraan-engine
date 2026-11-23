@@ -318,7 +318,13 @@ impl World {
         let removed = self.storage_mut::<T>(entity)?.remove(entity)?;
         let id = TypeId::of::<T>();
         if id == TypeId::of::<Transform>() {
-            self.transforms.rebuild = true;
+            if self.children(entity).is_some() {
+                if self.hierarchy.dirty_subtrees.try_reserve(1).is_ok() {
+                    self.hierarchy.dirty_subtrees.insert(entity);
+                } else {
+                    self.transforms.rebuild = true;
+                }
+            }
             if let Some(storage) = self.storage_mut::<GlobalTransform>(entity) {
                 storage.remove(entity);
             }
