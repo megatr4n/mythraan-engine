@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::collections::BTreeSet;
 
 use mythraan_ecs::SystemAccess;
-use mythraan_ecs::prelude::{Query, Res, ResMut, Resources};
+use mythraan_ecs::prelude::{Query, QueryMut, Res, ResMut, Resources};
 
 #[test]
 fn shared_queries_declare_every_component_type_once() {
@@ -55,4 +55,19 @@ fn mutable_resources_declare_exclusive_access() {
     resources.insert(12_u32);
     *ResMut::<u32>::from_resources(&mut resources).unwrap() += 4;
     assert_eq!(resources.get::<u32>(), Some(&16));
+}
+
+#[test]
+fn mutable_queries_declare_writes_and_optional_reads() {
+    type Mixed<'world> = QueryMut<'world, (&'world u32, Option<&'world String>, &'world mut bool)>;
+
+    let access = SystemAccess::of::<Mixed<'_>>();
+    assert_eq!(
+        access.components().reads(),
+        &BTreeSet::from([TypeId::of::<u32>(), TypeId::of::<String>()])
+    );
+    assert_eq!(
+        access.components().writes(),
+        &BTreeSet::from([TypeId::of::<bool>()])
+    );
 }

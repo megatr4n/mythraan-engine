@@ -1,7 +1,8 @@
 use std::any::TypeId;
 use std::collections::BTreeSet;
 
-use crate::{Query, ReadQuery, Res, ResMut};
+use crate::query_mut::record_data_access;
+use crate::{Query, QueryMut, ReadQuery, Res, ResMut, WriteQuery};
 
 /// The types accessed in one kind of ECS storage.
 ///
@@ -68,6 +69,10 @@ impl SystemAccess {
     pub(crate) fn read_component(&mut self, id: TypeId) {
         self.components.read(id);
     }
+
+    pub(crate) fn write_component(&mut self, id: TypeId) {
+        self.components.write(id);
+    }
 }
 
 mod sealed {
@@ -86,6 +91,12 @@ impl<P: sealed::Param> SystemParam for P {}
 impl<Q: ReadQuery> sealed::Param for Query<'_, Q> {
     fn record_access(access: &mut SystemAccess) {
         Q::record_reads(access);
+    }
+}
+
+impl<Q: WriteQuery> sealed::Param for QueryMut<'_, Q> {
+    fn record_access(access: &mut SystemAccess) {
+        record_data_access::<Q>(access);
     }
 }
 

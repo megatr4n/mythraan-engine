@@ -5,7 +5,7 @@ use std::ops::Bound::{Included, Unbounded};
 use crate::change_detection::ComponentTicks;
 use crate::component_storage::ComponentStorage;
 use crate::sparse_set::SparseIndex;
-use crate::{Entity, EntityAllocator, QueryError};
+use crate::{Entity, EntityAllocator, QueryError, SystemAccess};
 
 mod fetch;
 mod filters;
@@ -59,6 +59,16 @@ fn requests(input: impl IntoIterator<Item = Request>) -> Requests {
 /// Use `&T`, `&mut T`, `Option<&T>`, or tuples of up to four of these forms.
 pub trait WriteQuery: fetch::Fetch {}
 impl<Q: fetch::Fetch> WriteQuery for Q {}
+
+pub(crate) fn record_data_access<Q: WriteQuery>(access: &mut SystemAccess) {
+    for request in Q::requests().into_iter().flatten() {
+        match request.access {
+            Access::Read | Access::Optional => access.read_component(request.id),
+            Access::Write => access.write_component(request.id),
+            _ => {}
+        }
+    }
+}
 
 /// A component filter or conjunction of up to four component filters.
 pub trait QueryFilter: filters::Filter {}
