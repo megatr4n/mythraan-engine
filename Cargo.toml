@@ -32,6 +32,11 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 trybuild = "1.0.122"
 uuid = { version = "1.29.3", default-features = false, features = ["serde"] }
 
+[patch.crates-io]
+# Carries the upstream pointer-provenance fix until it ships in a compatible release.
+crossbeam-epoch = { git = "https://github.com/crossbeam-rs/crossbeam.git", rev = "81ff7fe69e8c1d6d3323b4c521f46bb6049eeb18" }
+crossbeam-utils = { git = "https://github.com/crossbeam-rs/crossbeam.git", rev = "81ff7fe69e8c1d6d3323b4c521f46bb6049eeb18" }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
