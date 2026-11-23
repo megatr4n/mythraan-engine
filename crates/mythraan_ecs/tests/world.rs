@@ -1,5 +1,6 @@
 //! World behavior through the public ECS API.
 
+use mythraan_ecs::WorldInsertError;
 use mythraan_ecs::prelude::World;
 
 #[test]
@@ -106,4 +107,27 @@ fn despawn_cleans_every_component_storage_before_slot_reuse() {
     );
     assert_eq!(world.insert(replacement, 7_u32).unwrap(), None);
     assert_eq!(world.get::<u32>(survivor), Some(&9));
+}
+
+#[test]
+fn stale_id_cannot_read_or_modify_its_replacement() {
+    let mut world = World::new();
+    let old = world.spawn().unwrap();
+    assert!(world.despawn(old));
+    assert!(!world.despawn(old));
+    let live = world.spawn().unwrap();
+    assert_eq!(old.index(), live.index());
+    world.insert(live, 44_u32).unwrap();
+
+    assert!(!world.is_alive(old));
+    assert!(world.get::<u32>(old).is_none());
+    assert!(world.get_mut::<u32>(old).is_none());
+    assert!(world.remove::<u32>(old).is_none());
+    assert!(matches!(
+        world.insert(old, 55_u32),
+        Err(WorldInsertError::EntityNotAlive { entity }) if entity == old
+    ));
+    assert!(!world.despawn(old));
+    assert!(world.is_alive(live));
+    assert_eq!(world.get::<u32>(live), Some(&44));
 }
