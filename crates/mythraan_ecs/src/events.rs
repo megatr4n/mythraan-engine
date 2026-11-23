@@ -8,7 +8,25 @@ use crate::{EventReadError, EventWriteError};
 /// A queue that retains events for their frame of submission and the next frame.
 ///
 /// Call [`Self::advance_frame`] once at the frame boundary. Each queue
-/// owns its events and can be stored as an ECS resource.
+/// owns its events. Queues with `Send + Sync + 'static` event types can be
+/// stored in [`crate::Resources`].
+///
+/// ```
+/// use mythraan_ecs::prelude::Events;
+///
+/// struct HitEvent(u32);
+///
+/// let mut hits = Events::new();
+/// let mut sound = hits.reader();
+/// let mut damage = hits.reader();
+/// hits.writer().send(HitEvent(12))?;
+///
+/// assert_eq!(sound.read(&hits)?.count(), 1);
+/// hits.advance_frame();
+/// assert_eq!(damage.read(&hits)?.map(|hit| hit.0).sum::<u32>(), 12);
+/// assert_eq!(sound.read(&hits)?.count(), 0);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub struct Events<T> {
     previous: Vec<T>,
     current: Vec<T>,
@@ -98,14 +116,14 @@ impl<T> EventReader<T> {
     /// Iterates over unread events in submission order.
     ///
     /// Expired events are skipped. Dropping the iterator leaves events it
-    /// has not reached unread.
+    /// has not reached unread. Returned events borrow the queue.
     ///
     /// # Errors
     /// Returns an error if this reader belongs to a different queue.
-    pub fn read<'read>(
-        &'read mut self,
-        events: &'read Events<T>,
-    ) -> Result<impl FusedIterator<Item = &'read T>, EventReadError> {
+    pub fn read<'queue>(
+        &mut self,
+        events: &'queue Events<T>,
+    ) -> Result<impl FusedIterator<Item = &'queue T>, EventReadError> {
         if !Arc::ptr_eq(&self.identity, &events.identity) {
             return Err(EventReadError);
         }
@@ -125,13 +143,13 @@ impl<T> EventReader<T> {
     }
 }
 
-struct UnreadEvents<'read, T> {
-    next: &'read mut u64,
-    remaining: Chain<slice::Iter<'read, T>, slice::Iter<'read, T>>,
+struct UnreadEvents<'cursor, 'queue, T> {
+    next: &'cursor mut u64,
+    remaining: Chain<slice::Iter<'queue, T>, slice::Iter<'queue, T>>,
 }
 
-impl<'read, T> Iterator for UnreadEvents<'read, T> {
-    type Item = &'read T;
+impl<'queue, T> Iterator for UnreadEvents<'_, 'queue, T> {
+    type Item = &'queue T;
 
     fn next(&mut self) -> Option<Self::Item> {
         let event = self.remaining.next()?;
@@ -144,7 +162,7 @@ impl<'read, T> Iterator for UnreadEvents<'read, T> {
     }
 }
 
-impl<T> FusedIterator for UnreadEvents<'_, T> {}
+impl<T> FusedIterator for UnreadEvents<'_, '_, T> {}
 
 #[cfg(test)]
 mod tests {

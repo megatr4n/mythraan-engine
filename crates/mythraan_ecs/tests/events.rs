@@ -4,7 +4,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use mythraan_ecs::EventReadError;
-use mythraan_ecs::prelude::Events;
+use mythraan_ecs::prelude::{Events, World};
 
 #[test]
 fn events_expire_after_their_submission_frame_and_the_next_frame() {
@@ -145,4 +145,28 @@ fn unwinding_during_expiry_preserves_retained_events() {
     assert_eq!(reader.read(&events).unwrap().count(), 0);
     events.advance_frame();
     assert_eq!(events.reader().read(&events).unwrap().count(), 0);
+}
+
+#[test]
+fn world_resources_share_event_payloads_between_readers() {
+    struct HitEvent(u32);
+
+    let mut world = World::new();
+    world.resources_mut().insert(Events::<HitEvent>::new());
+    let (mut sound, mut damage) = {
+        let hits = world.resources().get::<Events<HitEvent>>().unwrap();
+        (hits.reader(), hits.reader())
+    };
+
+    {
+        let hits = world.resources_mut().get_mut::<Events<HitEvent>>().unwrap();
+        hits.writer().send(HitEvent(12)).unwrap();
+    }
+
+    let hits = world.resources().get::<Events<HitEvent>>().unwrap();
+    let for_sound = sound.read(hits).unwrap().next().unwrap();
+    assert_eq!(sound.read(hits).unwrap().count(), 0);
+    let for_damage = damage.read(hits).unwrap().next().unwrap();
+    assert!(std::ptr::eq(for_sound, for_damage));
+    assert_eq!(for_damage.0, 12);
 }
