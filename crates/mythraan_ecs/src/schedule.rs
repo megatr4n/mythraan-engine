@@ -47,6 +47,32 @@ pub struct SystemFlush {
 ///
 /// Conflicting systems run in registration order. Queued structural changes
 /// are applied after all batches finish successfully.
+///
+/// ```
+/// use mythraan_ecs::prelude::{Commands, ResMut, Schedule, SystemAccess, World};
+///
+/// let mut world = World::new();
+/// world.resources_mut().insert(0_u32);
+/// let mut schedule = Schedule::new();
+/// schedule.add_system(
+///     SystemAccess::of::<(ResMut<'_, u32>, Commands<'_>)>(),
+///     |mut scope, commands| {
+///         if let Some(mut count) = scope.resources.get_mut::<u32>()? {
+///             *count += 1;
+///         }
+///         if let Some(mut commands) = commands {
+///             let spawned = commands.spawn();
+///             commands.insert(&spawned, true);
+///         }
+///         Ok(())
+///     },
+/// );
+/// let reports = schedule.run(&mut world)?;
+/// assert_eq!(world.resources().get::<u32>(), Some(&1));
+/// assert_eq!(world.query::<&bool>().count(), 1);
+/// assert!(reports.iter().all(|entry| entry.report.failures().is_empty()));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Default)]
 pub struct Schedule {
     accesses: Vec<SystemAccess>,
@@ -93,12 +119,18 @@ impl Schedule {
     ///
     /// Systems in later batches can see earlier component and resource
     /// writes. Structural commands become visible at the end of the run.
+    /// Command failures are recorded in the returned reports.
+    /// The caller controls the change tick through [`World::advance_change_tick`].
     ///
     /// # Errors
     ///
     /// If a system returns an access error, the first error in batch then
     /// registration order is returned. Pending commands are discarded.
     /// Direct writes already made by systems stay applied.
+    ///
+    /// # Panics
+    ///
+    /// A panic in a system propagates before any queued commands are applied.
     pub fn run(&mut self, world: &mut World) -> Result<Vec<SystemFlush>, ScheduleError> {
         self.prepare_batches();
         let accesses = &self.accesses;
