@@ -2,7 +2,9 @@ use std::any::TypeId;
 use std::collections::BTreeSet;
 
 use crate::query_mut::{record_data_access, record_filter_access};
-use crate::{FilteredQuery, Query, QueryFilter, QueryMut, ReadQuery, Res, ResMut, WriteQuery};
+use crate::{
+    Commands, FilteredQuery, Query, QueryFilter, QueryMut, ReadQuery, Res, ResMut, WriteQuery,
+};
 
 /// The types accessed in one kind of ECS storage.
 ///
@@ -43,6 +45,7 @@ impl AccessSet {
 pub struct SystemAccess {
     components: AccessSet,
     resources: AccessSet,
+    deferred_commands: bool,
 }
 
 impl SystemAccess {
@@ -64,6 +67,12 @@ impl SystemAccess {
     #[must_use]
     pub fn resources(&self) -> &AccessSet {
         &self.resources
+    }
+
+    /// Returns whether the system requests a deferred command buffer.
+    #[must_use]
+    pub fn uses_commands(&self) -> bool {
+        self.deferred_commands
     }
 
     pub(crate) fn read_component(&mut self, id: TypeId) {
@@ -116,5 +125,11 @@ impl<T: Send + Sync + 'static> sealed::Param for Res<'_, T> {
 impl<T: Send + Sync + 'static> sealed::Param for ResMut<'_, T> {
     fn record_access(access: &mut SystemAccess) {
         access.resources.write(TypeId::of::<T>());
+    }
+}
+
+impl sealed::Param for Commands<'_> {
+    fn record_access(access: &mut SystemAccess) {
+        access.deferred_commands = true;
     }
 }

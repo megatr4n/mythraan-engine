@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 
 use mythraan_ecs::SystemAccess;
 use mythraan_ecs::prelude::{
-    Added, Changed, FilteredQuery, Query, QueryMut, Res, ResMut, Resources, With, Without, World,
+    Added, Changed, CommandBuffer, Commands, FilteredQuery, Query, QueryMut, Res, ResMut,
+    Resources, With, Without, World,
 };
 
 #[test]
@@ -119,4 +120,36 @@ fn typed_filter_parameters_use_the_world_query_rules() {
         });
     assert_eq!(world.get::<u32>(matching), Some(&11));
     assert_eq!(world.get::<u32>(other), Some(&20));
+}
+
+#[test]
+fn commands_declare_deferred_access_and_leave_the_world_available_until_flush() {
+    let access = SystemAccess::of::<Commands<'_>>();
+    assert!(access.uses_commands());
+    assert!(access.components().reads().is_empty());
+    assert!(access.components().writes().is_empty());
+    assert!(access.resources().reads().is_empty());
+    assert!(access.resources().writes().is_empty());
+
+    let mut world = World::new();
+    let original = world.spawn().unwrap();
+    let mut buffer = CommandBuffer::new();
+    let pending = {
+        let mut commands = Commands::new(&mut buffer);
+        let pending = commands.spawn();
+        commands.insert(&pending, 15_u32);
+        commands.insert(&pending, true);
+        commands.remove::<bool>(&pending);
+        commands.despawn(original);
+        pending
+    };
+
+    assert!(world.is_alive(original));
+    assert_eq!(world.query::<&u32>().count(), 0);
+    let report = buffer.flush(&mut world);
+    assert!(report.failures().is_empty());
+    assert!(!world.is_alive(original));
+    let entity = report.resolve(&pending).unwrap();
+    assert_eq!(world.get::<u32>(entity), Some(&15));
+    assert_eq!(world.get::<bool>(entity), None);
 }

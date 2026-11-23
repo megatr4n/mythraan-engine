@@ -20,7 +20,7 @@ mod system_access;
 mod world;
 
 pub use command_buffer::{
-    CommandBuffer, CommandFailure, CommandTarget, DeferredEntity, FlushReport,
+    CommandBuffer, CommandFailure, CommandTarget, Commands, DeferredEntity, FlushReport,
 };
 pub use entity::{Entity, EntityAllocator};
 pub use error::{

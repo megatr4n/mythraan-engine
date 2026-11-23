@@ -168,6 +168,44 @@ pub struct CommandBuffer {
     spawn_count: usize,
 }
 
+/// A system's queue for submitting deferred structural changes.
+pub struct Commands<'queue>(&'queue mut CommandBuffer);
+
+impl<'queue> Commands<'queue> {
+    /// Borrows the command queue assigned to the system.
+    #[must_use]
+    pub fn new(buffer: &'queue mut CommandBuffer) -> Self {
+        Self(buffer)
+    }
+
+    /// Queues creation of an entity and returns its placeholder.
+    pub fn spawn(&mut self) -> DeferredEntity {
+        self.0.spawn()
+    }
+
+    /// Queues removal of an entity and its components.
+    pub fn despawn<'entity>(&mut self, entity: impl Into<CommandTarget<'entity>>) {
+        self.0.despawn(entity);
+    }
+
+    /// Queues insertion or replacement of a component.
+    pub fn insert<'entity, T: Send + Sync + 'static>(
+        &mut self,
+        entity: impl Into<CommandTarget<'entity>>,
+        component: T,
+    ) {
+        self.0.insert(entity, component);
+    }
+
+    /// Queues removal of a component.
+    pub fn remove<'entity, T: Send + Sync + 'static>(
+        &mut self,
+        entity: impl Into<CommandTarget<'entity>>,
+    ) {
+        self.0.remove::<T>(entity);
+    }
+}
+
 impl CommandBuffer {
     /// Creates an empty command buffer.
     #[must_use]
