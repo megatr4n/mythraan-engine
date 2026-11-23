@@ -1,3 +1,3 @@
 //! Common application types.
 
-pub use crate::{App, Plugin, Stage, Time};
+pub use crate::{App, AppError, Plugin, Stage, Time};

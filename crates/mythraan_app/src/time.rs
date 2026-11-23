@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+pub(crate) const FIXED_HZ: u64 = 60;
+
 /// Timing information published as an application resource.
 ///
 /// Frame and fixed tick numbers start at zero before the first frame.
@@ -14,7 +16,8 @@ pub struct Time {
 
 impl Time {
     /// Duration of one 60 Hz step rounded to the nearest nanosecond.
-    pub const FIXED_STEP: Duration = Duration::from_nanos(16_666_667);
+    pub const FIXED_STEP: Duration =
+        Duration::from_nanos((1_000_000_000 + FIXED_HZ / 2) / FIXED_HZ);
 
     /// One-based frame number during execution, or zero before the first frame.
     #[must_use]
