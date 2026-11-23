@@ -2,8 +2,8 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use mythraan_ecs::HierarchyError;
-use mythraan_ecs::prelude::{Parent, World};
+use mythraan_ecs::prelude::{CommandBuffer, Parent, World};
+use mythraan_ecs::{CommandError, HierarchyError, WorldInsertError};
 
 #[test]
 fn moving_a_child_updates_both_parents_and_detaching_makes_it_a_root() {
@@ -132,4 +132,36 @@ fn a_panicking_descendant_can_be_cleaned_up_by_retrying_the_root() {
     assert_eq!(world.children(root).unwrap().as_slice(), [failing]);
     assert!(world.despawn(root));
     assert!(!world.is_alive(failing));
+}
+
+#[test]
+fn deferred_despawn_removes_descendants_in_command_order() {
+    let mut world = World::new();
+    let root = world.spawn().unwrap();
+    let leaf = world.spawn().unwrap();
+    let other = world.spawn().unwrap();
+    world.insert(root, 5_u32).unwrap();
+    world.set_parent(leaf, Some(root)).unwrap();
+
+    let mut commands = CommandBuffer::new();
+    for (entity, _) in world.query::<&u32>() {
+        commands.despawn(entity);
+    }
+    commands.insert(leaf, true);
+    commands.insert(other, false);
+    assert!(world.is_alive(root));
+    assert!(world.is_alive(leaf));
+
+    let report = commands.flush(&mut world);
+    let [failure] = report.failures() else {
+        panic!("expected one failed command, got {report:?}");
+    };
+    assert_eq!(failure.index, 1);
+    assert!(matches!(
+        failure.error,
+        CommandError::Insert(WorldInsertError::EntityNotAlive { entity }) if entity == leaf
+    ));
+    assert!(!world.is_alive(root));
+    assert!(!world.is_alive(leaf));
+    assert_eq!(world.get::<bool>(other), Some(&false));
 }
