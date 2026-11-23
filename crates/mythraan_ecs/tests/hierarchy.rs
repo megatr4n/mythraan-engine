@@ -1,5 +1,7 @@
 //! Entity hierarchy behavior through the public ECS API.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use mythraan_ecs::HierarchyError;
 use mythraan_ecs::prelude::{Parent, World};
 
@@ -104,4 +106,30 @@ fn a_deep_hierarchy_is_despawned_without_call_stack_recursion() {
     assert!(world.despawn(root));
     assert!(lineage.into_iter().all(|entity| !world.is_alive(entity)));
     assert!(world.children(root).is_none());
+}
+
+#[test]
+fn a_panicking_descendant_can_be_cleaned_up_by_retrying_the_root() {
+    struct PanicOnDrop;
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("component destructor unwound");
+        }
+    }
+
+    let mut world = World::new();
+    let root = world.spawn().unwrap();
+    let failing = world.spawn().unwrap();
+    let removed = world.spawn().unwrap();
+    world.set_parent(failing, Some(root)).unwrap();
+    world.set_parent(removed, Some(failing)).unwrap();
+    world.insert(failing, PanicOnDrop).unwrap();
+
+    assert!(catch_unwind(AssertUnwindSafe(|| world.despawn(root))).is_err());
+    assert!(!world.is_alive(removed));
+    assert!(world.is_alive(root));
+    assert!(world.is_alive(failing));
+    assert_eq!(world.children(root).unwrap().as_slice(), [failing]);
+    assert!(world.despawn(root));
+    assert!(!world.is_alive(failing));
 }
