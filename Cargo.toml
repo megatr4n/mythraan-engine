@@ -12,6 +12,7 @@ publish = false
 cap-std = "3.4.6"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 glam = "0.29.3"
+mythraan_ecs = { path = "crates/mythraan_ecs" }
 mythraan_math = { path = "crates/mythraan_math" }
 mythraan_reflect_derive = { path = "crates/mythraan_reflect_derive" }
 notify = "=8.0.0"
