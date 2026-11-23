@@ -3,6 +3,7 @@
 #![cfg(feature = "reflect")]
 
 use std::any::{TypeId, type_name};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use mythraan_ecs::Changed;
 use mythraan_ecs::{ReflectComponentError, World};
@@ -75,4 +76,62 @@ fn registered_metadata_resolves_a_field_on_an_existing_component() {
         world.reflected_field(entity, type_id, "speed"),
         Err(ReflectComponentError::MissingComponent(stale)) if stale == entity
     ));
+}
+
+#[test]
+fn a_stale_entity_cannot_edit_its_recycled_slot() {
+    let mut world = World::new();
+    world.register_type::<Motion>().unwrap();
+    let stale = world.spawn().unwrap();
+    world.insert(stale, Motion { speed: 3 }).unwrap();
+    assert!(world.despawn(stale));
+    let current = world.spawn().unwrap();
+    assert_eq!(stale.index(), current.index());
+    world.insert(current, Motion { speed: 5 }).unwrap();
+    assert_eq!(
+        world.set_reflected_field(stale, TypeId::of::<Motion>(), "speed", 11_u32),
+        Err(ReflectComponentError::MissingComponent(stale))
+    );
+    assert_eq!(world.get::<Motion>(current).unwrap().speed, 5);
+}
+
+struct DropBomb(bool);
+
+impl Drop for DropBomb {
+    fn drop(&mut self) {
+        assert!(!self.0, "old value panicked during drop");
+    }
+}
+
+#[derive(Reflect)]
+struct Slot {
+    value: DropBomb,
+}
+
+#[test]
+fn replacing_a_field_publishes_the_new_value_before_dropping_the_old_one() {
+    let mut world = World::new();
+    world.register_type::<Slot>().unwrap();
+    let entity = world.spawn().unwrap();
+    world
+        .insert(
+            entity,
+            Slot {
+                value: DropBomb(true),
+            },
+        )
+        .unwrap();
+    world.advance_change_tick().unwrap();
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            world.set_reflected_field(entity, TypeId::of::<Slot>(), "value", DropBomb(false))
+        }))
+        .is_err()
+    );
+    let mut seen = Vec::new();
+    world
+        .query_filtered_mut::<&Slot, Changed<Slot>>()
+        .unwrap()
+        .for_each(|matched, slot| seen.push((matched, slot.value.0)));
+    assert_eq!(seen, [(entity, false)]);
 }
