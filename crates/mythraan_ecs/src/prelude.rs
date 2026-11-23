@@ -1,6 +1,6 @@
 //! Commonly used ECS types.
 
 pub use crate::{
-    CommandBuffer, DeferredEntity, Entity, EntityAllocator, EventReader, EventWriter, Events,
-    Query, QueryMut, Resources, SparseSet, With, Without, World,
+    Added, CommandBuffer, DeferredEntity, Entity, EntityAllocator, EventReader, EventWriter,
+    Events, Query, QueryMut, Resources, SparseSet, With, Without, World,
 };

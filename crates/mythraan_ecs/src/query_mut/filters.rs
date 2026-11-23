@@ -8,6 +8,9 @@ pub struct With<T>(PhantomData<fn() -> T>);
 /// Matches entities that lack the component `T`.
 pub struct Without<T>(PhantomData<fn() -> T>);
 
+/// Matches entities whose component `T` was added within the query's tick range.
+pub struct Added<T>(PhantomData<fn() -> T>);
+
 pub trait Condition {
     fn request() -> Request;
 }
@@ -19,6 +22,11 @@ impl<T: Send + Sync + 'static> Condition for With<T> {
 impl<T: Send + Sync + 'static> Condition for Without<T> {
     fn request() -> Request {
         Request::of::<T>(Access::Without)
+    }
+}
+impl<T: Send + Sync + 'static> Condition for Added<T> {
+    fn request() -> Request {
+        Request::of::<T>(Access::Added)
     }
 }
 

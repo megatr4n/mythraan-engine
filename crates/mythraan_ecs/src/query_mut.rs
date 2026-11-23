@@ -8,7 +8,7 @@ use crate::{Entity, EntityAllocator, QueryError};
 
 mod fetch;
 mod filters;
-pub use filters::{With, Without};
+pub use filters::{Added, With, Without};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Access {
@@ -17,6 +17,7 @@ enum Access {
     Write,
     With,
     Without,
+    Added,
 }
 
 pub struct Request {
@@ -38,6 +39,7 @@ impl Request {
 pub struct Column<'world> {
     id: TypeId,
     index: SparseIndex<'world>,
+    added_ticks: &'world [u64],
     shared: Option<&'world (dyn Any + Send + Sync)>,
     exclusive: Option<&'world mut (dyn Any + Send + Sync)>,
 }
@@ -56,7 +58,7 @@ fn requests(input: impl IntoIterator<Item = Request>) -> Requests {
 pub trait WriteQuery: fetch::Fetch {}
 impl<Q: fetch::Fetch> WriteQuery for Q {}
 
-/// A presence filter or conjunction of up to four presence filters.
+/// A component filter or conjunction of up to four component filters.
 pub trait QueryFilter: filters::Filter {}
 impl<F: filters::Filter> QueryFilter for F {}
 
@@ -64,7 +66,8 @@ impl<F: filters::Filter> QueryFilter for F {}
 pub struct QueryMut<'world, Q: WriteQuery> {
     entities: &'world EntityAllocator,
     candidates: Option<&'world [Entity]>,
-    filters: [Option<(SparseIndex<'world>, bool)>; 4],
+    filters: [Option<PreparedFilter<'world>>; 4],
+    after_tick: u64,
     state: Option<Q::State<'world>>,
 }
 
@@ -73,6 +76,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
         entities: &'world EntityAllocator,
         storages: &'world mut BTreeMap<TypeId, Box<dyn ComponentStorage>>,
         filters: Requests,
+        after_tick: u64,
     ) -> Result<Self, QueryError> {
         let requests = Q::requests();
         for (position, request) in requests.iter().enumerate() {
@@ -101,7 +105,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             let Some(slot) = columns.iter_mut().find(|column| column.is_none()) else {
                 break;
             };
-            let (index, _, values) = storage.query_parts();
+            let (index, added_ticks, values) = storage.query_parts();
             let (shared, exclusive) = if request.access == Access::Write {
                 (None, Some(values))
             } else {
@@ -110,6 +114,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             *slot = Some(Column {
                 id,
                 index,
+                added_ticks,
                 shared,
                 exclusive,
             });
@@ -120,13 +125,23 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             .map(|request| index_of(&columns, request.id).entities())
             .min_by_key(|source| source.len());
         let filters = filters.map(|filter| {
-            filter.map(|filter| (index_of(&columns, filter.id), filter.access == Access::With))
+            filter.map(|filter| {
+                let (index, added_ticks) = column_of(&columns, filter.id)
+                    .map(|column| (column.index, column.added_ticks))
+                    .unwrap_or_default();
+                PreparedFilter {
+                    index,
+                    added_ticks,
+                    access: filter.access,
+                }
+            })
         });
         let state = Q::prepare(&mut columns);
         Ok(Self {
             entities,
             candidates,
             filters,
+            after_tick,
             state,
         })
     }
@@ -146,7 +161,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             if filters
                 .iter()
                 .flatten()
-                .all(|(index, present)| index.position(entity).is_some() == *present)
+                .all(|filter| filter.matches(entity, self.after_tick))
                 && let Some(item) = Q::get(state, entity)
             {
                 visit(entity, item);
@@ -159,10 +174,30 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
     }
 }
 
+struct PreparedFilter<'world> {
+    index: SparseIndex<'world>,
+    added_ticks: &'world [u64],
+    access: Access,
+}
+
+impl PreparedFilter<'_> {
+    fn matches(&self, entity: Entity, after_tick: u64) -> bool {
+        let position = self.index.position(entity);
+        match self.access {
+            Access::With => position.is_some(),
+            Access::Without => position.is_none(),
+            Access::Added => position
+                .and_then(|position| self.added_ticks.get(position))
+                .is_some_and(|&tick| tick > after_tick),
+            _ => false,
+        }
+    }
+}
+
 fn index_of<'world>(columns: &Columns<'world>, id: TypeId) -> SparseIndex<'world> {
-    columns
-        .iter()
-        .flatten()
-        .find(|column| column.id == id)
-        .map_or_else(SparseIndex::default, |column| column.index)
+    column_of(columns, id).map_or_else(SparseIndex::default, |column| column.index)
+}
+
+fn column_of<'a, 'world>(columns: &'a Columns<'world>, id: TypeId) -> Option<&'a Column<'world>> {
+    columns.iter().flatten().find(|column| column.id == id)
 }

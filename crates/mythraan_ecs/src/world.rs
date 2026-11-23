@@ -138,7 +138,7 @@ impl World {
         self.query_filtered_mut::<Q, ()>()
     }
 
-    /// Prepares a query restricted by the component presence filters in `F`.
+    /// Prepares a filtered query. Change filters only match the current tick.
     ///
     /// # Errors
     ///
@@ -146,7 +146,13 @@ impl World {
     pub fn query_filtered_mut<Q: WriteQuery, F: QueryFilter>(
         &mut self,
     ) -> Result<QueryMut<'_, Q>, QueryError> {
-        QueryMut::new(&self.entities, &mut self.components, F::requests())
+        let after_tick = self.change_tick() - 1;
+        QueryMut::new(
+            &self.entities,
+            &mut self.components,
+            F::requests(),
+            after_tick,
+        )
     }
 
     /// Inserts a component and returns the previous value of the same type, if any.

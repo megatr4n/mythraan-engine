@@ -26,7 +26,7 @@ pub use error::{
 };
 pub use events::{EventReader, EventWriter, Events};
 pub use query::{Query, ReadQuery};
-pub use query_mut::{QueryFilter, QueryMut, With, Without, WriteQuery};
+pub use query_mut::{Added, QueryFilter, QueryMut, With, Without, WriteQuery};
 pub use resources::Resources;
 pub use sparse_set::SparseSet;
 pub use world::World;
