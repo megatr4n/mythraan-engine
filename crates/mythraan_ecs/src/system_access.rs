@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::BTreeSet;
 
-use crate::{Query, ReadQuery};
+use crate::{Query, ReadQuery, Res};
 
 /// The types accessed in one kind of ECS storage.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -21,6 +21,7 @@ impl AccessSet {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemAccess {
     components: AccessSet,
+    resources: AccessSet,
 }
 
 impl SystemAccess {
@@ -36,6 +37,12 @@ impl SystemAccess {
     #[must_use]
     pub fn components(&self) -> &AccessSet {
         &self.components
+    }
+
+    /// Returns the system's resource access.
+    #[must_use]
+    pub fn resources(&self) -> &AccessSet {
+        &self.resources
     }
 
     pub(crate) fn read_component(&mut self, id: TypeId) {
@@ -59,5 +66,11 @@ impl<P: sealed::Param> SystemParam for P {}
 impl<Q: ReadQuery> sealed::Param for Query<'_, Q> {
     fn record_access(access: &mut SystemAccess) {
         Q::record_reads(access);
+    }
+}
+
+impl<T: Send + Sync + 'static> sealed::Param for Res<'_, T> {
+    fn record_access(access: &mut SystemAccess) {
+        access.resources.reads.insert(TypeId::of::<T>());
     }
 }

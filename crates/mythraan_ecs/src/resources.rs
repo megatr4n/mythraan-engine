@@ -1,11 +1,31 @@
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::mem;
+use std::ops::Deref;
 
 /// Stores one shared value of each Rust type.
 #[derive(Default)]
 pub struct Resources {
     values: BTreeMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
+/// A system's shared borrow of the resource of type `T`.
+pub struct Res<'world, T>(&'world T);
+
+impl<'world, T: Send + Sync + 'static> Res<'world, T> {
+    /// Borrows the resource if it is present.
+    #[must_use]
+    pub fn from_resources(resources: &'world Resources) -> Option<Self> {
+        resources.get().map(Self)
+    }
+}
+
+impl<T> Deref for Res<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.0
+    }
 }
 
 impl Resources {
