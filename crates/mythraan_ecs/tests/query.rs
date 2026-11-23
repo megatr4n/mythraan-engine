@@ -104,6 +104,23 @@ fn query_reads_only_current_entities_after_recycling() {
 }
 
 #[test]
+fn reads_can_overlap_and_repeat_a_component_type() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Health(35)).unwrap();
+
+    let mut first = world.query::<&Health>();
+    let mut second = world.query::<(&Health, &Health)>();
+    let (first_id, health) = first.next().unwrap();
+    let (second_id, (left, right)) = second.next().unwrap();
+    assert_eq!((first_id, second_id), (entity, entity));
+    assert!(std::ptr::eq(health, left));
+    assert!(std::ptr::eq(health, right));
+    assert!(first.next().is_none());
+    assert!(second.next().is_none());
+}
+
+#[test]
 fn single_query_reads_components_from_matching_entities() {
     let mut world = World::new();
     let first = world.spawn().unwrap();
