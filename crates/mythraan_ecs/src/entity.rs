@@ -138,6 +138,15 @@ impl EntityAllocator {
             .get(entity.index as usize)
             .is_some_and(|slot| slot.is_live(entity.generation))
     }
+
+    pub(crate) fn live_entities(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.slots.iter().enumerate().filter_map(|(index, slot)| {
+            matches!(slot.state, SlotState::Live).then_some(Entity {
+                index: index as u32,
+                generation: slot.generation,
+            })
+        })
+    }
 }
 
 #[cfg(test)]

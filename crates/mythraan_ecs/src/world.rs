@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::component_storage::ComponentStorage;
 use crate::{
-    Entity, EntityAllocError, EntityAllocator, Query, ReadQuery, Resources, SparseSet,
-    WorldInsertError,
+    Entity, EntityAllocError, EntityAllocator, Query, QueryError, QueryMut, ReadQuery, Resources,
+    SparseSet, WorldInsertError, WriteQuery,
 };
 
 /// Owns the entities, components, and shared resources in a simulation.
@@ -97,6 +97,16 @@ impl World {
     /// Iterates over the entities that have every component specified by the query.
     pub fn query<Q: ReadQuery>(&self) -> Query<'_, Q> {
         Query::new(self)
+    }
+
+    /// Borrows the world exclusively and prepares component access for a query.
+    ///
+    /// # Errors
+    ///
+    /// Returns a conflict if a component is requested more than once and at
+    /// least one request is mutable.
+    pub fn query_mut<Q: WriteQuery>(&mut self) -> Result<QueryMut<'_, Q>, QueryError> {
+        QueryMut::new(&self.entities, &mut self.components)
     }
 
     /// Inserts a component and returns the previous value of the same type, if any.

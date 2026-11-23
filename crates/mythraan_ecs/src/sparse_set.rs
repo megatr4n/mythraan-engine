@@ -3,6 +3,24 @@ use std::num::NonZeroUsize;
 
 use crate::{Entity, SparseSetError};
 
+#[derive(Clone, Copy, Default)]
+pub struct SparseIndex<'world> {
+    sparse: &'world [Option<NonZeroUsize>],
+    entities: &'world [Entity],
+}
+
+impl<'world> SparseIndex<'world> {
+    pub(crate) fn entities(self) -> &'world [Entity] {
+        self.entities
+    }
+
+    pub(crate) fn position(self, entity: Entity) -> Option<usize> {
+        let sparse_index = usize::try_from(entity.index()).ok()?;
+        let index = self.sparse.get(sparse_index)?.as_ref()?.get() - 1;
+        (self.entities.get(index) == Some(&entity)).then_some(index)
+    }
+}
+
 /// Stores one packed component per entity index within a single allocator.
 ///
 /// The caller validates liveness with that allocator before inserting.
@@ -131,6 +149,14 @@ impl<T> SparseSet<T> {
         &self.entities
     }
 
+    pub(crate) fn query_parts(&mut self) -> (SparseIndex<'_>, &mut Vec<T>) {
+        let index = SparseIndex {
+            sparse: &self.sparse,
+            entities: &self.entities,
+        };
+        (index, &mut self.values)
+    }
+
     /// Iterates over the stored entities and their components.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (Entity, &T)> {
         self.entities.iter().copied().zip(&self.values)
@@ -142,9 +168,11 @@ impl<T> SparseSet<T> {
     }
 
     fn dense_index(&self, entity: Entity) -> Option<usize> {
-        let sparse_index = usize::try_from(entity.index()).ok()?;
-        let index = self.sparse.get(sparse_index)?.as_ref()?.get() - 1;
-        (self.entities.get(index) == Some(&entity)).then_some(index)
+        SparseIndex {
+            sparse: &self.sparse,
+            entities: &self.entities,
+        }
+        .position(entity)
     }
 }
 

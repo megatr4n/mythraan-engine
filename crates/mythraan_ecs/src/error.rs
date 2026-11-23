@@ -4,6 +4,14 @@ use thiserror::Error;
 
 use crate::Entity;
 
+/// An exclusive query requests conflicting access to a component.
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("conflicting query access to component {component}")]
+pub struct QueryError {
+    /// The Rust type name of the component with conflicting access.
+    pub component: &'static str,
+}
+
 /// An allocator could not issue an entity identifier.
 #[derive(Debug, Error)]
 pub enum EntityAllocError {
