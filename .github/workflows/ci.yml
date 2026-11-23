@@ -27,11 +27,11 @@ jobs:
 
   miri:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        suite: [ecs, conflict_graph, hierarchy]
+        suite: [ecs, conflict_graph, hierarchy, transform_propagation]
     env:
       MIRI_TOOLCHAIN: nightly-2026-11-22
     steps:
@@ -50,8 +50,9 @@ jobs:
           import sys
 
           package = next(pkg for pkg in json.load(sys.stdin)["packages"] if pkg["name"] == "mythraan_ecs")
+          long_suites = {"conflict_graph", "hierarchy", "transform_propagation"}
           for target in package["targets"]:
-              if "test" in target["kind"] and target["name"] not in {"conflict_graph", "hierarchy"}:
+              if "test" in target["kind"] and target["name"] not in long_suites:
                   print(target["name"])
           ')
           args=(--lib)
