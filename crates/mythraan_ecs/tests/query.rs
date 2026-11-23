@@ -73,6 +73,37 @@ fn disjoint_storages_exhaust_the_query_without_matching() {
 }
 
 #[test]
+fn query_reads_only_current_entities_after_recycling() {
+    let mut world = World::new();
+    let dead = world.spawn().unwrap();
+    let partial = world.spawn().unwrap();
+    let survivor = world.spawn().unwrap();
+    for (entity, value) in [(dead, 3), (partial, 5), (survivor, 7)] {
+        world.insert(entity, Health(value)).unwrap();
+        world.insert(entity, Position(value as i32 * 10)).unwrap();
+    }
+    world.remove::<Position>(partial).unwrap();
+    assert!(world.despawn(dead));
+    let replacement = world.spawn().unwrap();
+    assert_eq!(replacement.index(), dead.index());
+    assert_ne!(replacement.generation(), dead.generation());
+    world.insert(replacement, Position(90)).unwrap();
+
+    let rows: Vec<_> = world.query::<(&Position, &Health)>().collect();
+    assert_eq!(rows, [(survivor, (&Position(70), &Health(7)))]);
+    world.insert(replacement, Health(9)).unwrap();
+    let mut rows: Vec<_> = world.query::<(&Position, &Health)>().collect();
+    rows.sort_unstable_by_key(|(entity, _)| entity.index());
+    assert_eq!(
+        rows,
+        [
+            (replacement, (&Position(90), &Health(9))),
+            (survivor, (&Position(70), &Health(7))),
+        ]
+    );
+}
+
+#[test]
 fn single_query_reads_components_from_matching_entities() {
     let mut world = World::new();
     let first = world.spawn().unwrap();
