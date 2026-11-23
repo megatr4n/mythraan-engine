@@ -5,7 +5,7 @@ use std::any::TypeId;
 use mythraan_ecs::prelude::{
     Changed, ConflictGraph, FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess, With, World,
 };
-use mythraan_ecs::{QueryError, ScopeError, StorageKind};
+use mythraan_ecs::{QueryError, ScopeError, StorageKind, SystemScope};
 use mythraan_math::glam::Vec3;
 use mythraan_math::transform::{GlobalTransform, Transform};
 
@@ -287,4 +287,11 @@ fn graph_batches_keep_component_and_resource_borrows_independent() {
     drop(scopes);
     assert_eq!(world.get::<u32>(entity), Some(&17));
     assert!(world.scope_batch([]).unwrap().is_empty());
+}
+
+#[test]
+fn complete_system_scopes_are_send_and_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    assert_send_sync::<SystemScope<'_>>();
 }

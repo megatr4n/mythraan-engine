@@ -135,6 +135,17 @@ impl World {
     ///
     /// Scopes keep structural changes outside the batch by borrowing the world.
     ///
+    /// ```compile_fail,E0499
+    /// use mythraan_ecs::prelude::{ResMut, SystemAccess, World};
+    ///
+    /// let mut world = World::new();
+    /// let access = SystemAccess::of::<ResMut<'_, u32>>();
+    /// let scopes = world.scope_batch([&access])?;
+    /// world.spawn()?;
+    /// drop(scopes);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
     /// # Errors
     /// Returns an error if the declarations contain conflicting access.
     pub fn scope_batch<'world>(
