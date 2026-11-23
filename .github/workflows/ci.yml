@@ -28,6 +28,10 @@ jobs:
   miri:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [ecs, conflict_graph, hierarchy]
     env:
       MIRI_TOOLCHAIN: nightly-2026-11-22
     steps:
@@ -37,8 +41,32 @@ jobs:
           rustup toolchain install "$MIRI_TOOLCHAIN" --profile minimal --component miri --component rust-src --no-self-update
           cargo +"$MIRI_TOOLCHAIN" miri setup
       - name: Test ECS with Miri
-        run: cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features
+        if: matrix.suite == 'ecs'
+        shell: bash
+        run: |
+          targets=$(cargo +"$MIRI_TOOLCHAIN" metadata --locked --no-deps --format-version 1 |
+            python3 -c '
+          import json
+          import sys
+
+          package = next(pkg for pkg in json.load(sys.stdin)["packages"] if pkg["name"] == "mythraan_ecs")
+          for target in package["targets"]:
+              if "test" in target["kind"] and target["name"] not in {"conflict_graph", "hierarchy"}:
+                  print(target["name"])
+          ')
+          args=(--lib)
+          while IFS= read -r target; do
+            [[ -z "$target" ]] || args+=(--test "$target")
+          done <<< "$targets"
+          cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features "${args[@]}"
+          cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features --doc
+      - name: Test the long integration suite with Miri
+        if: matrix.suite != 'ecs'
+        env:
+          MIRI_SUITE: ${{ matrix.suite }}
+        run: cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features --test "$MIRI_SUITE"
       - name: Stress ECS across additional thread schedules
+        if: matrix.suite == 'ecs'
         env:
           MIRIFLAGS: -Zmiri-many-seeds=1..4
         run: cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features --test scheduler_stress --test command_buffer_stress
