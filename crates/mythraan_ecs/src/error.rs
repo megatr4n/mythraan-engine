@@ -10,6 +10,17 @@ use crate::Entity;
 #[error("world change tick exhausted")]
 pub struct ChangeTickError;
 
+/// Invalid ordering or configuration for a schedule.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ScheduleConfigError {
+    /// The referenced registration index does not exist in the schedule.
+    #[error("unknown system {0}")]
+    UnknownSystem(usize),
+    /// The explicit ordering has a cycle.
+    #[error("system ordering contains a cycle")]
+    Cycle,
+}
+
 /// A schedule could not prepare or execute a system's storage access.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ScheduleError {

@@ -3,9 +3,13 @@ use std::mem;
 use rayon::prelude::*;
 
 use crate::{
-    CommandBuffer, Commands, ConflictGraph, FlushReport, ScheduleError, ScopeError, SystemAccess,
-    SystemScope, World,
+    CommandBuffer, Commands, ConflictGraph, FlushReport, ScheduleConfigError, ScheduleError,
+    ScopeError, SystemAccess, SystemScope, World,
 };
+
+mod order;
+use order::OrderPlan;
+pub use order::SystemOrder;
 
 type Callback = dyn for<'world, 'queue> FnMut(
         SystemScope<'world>,
@@ -45,7 +49,7 @@ pub struct SystemFlush {
 
 /// Runs systems in conflict-free batches using the current Rayon pool.
 ///
-/// Conflicting systems run in registration order. Queued structural changes
+/// Conflicting systems default to registration order. Queued structural changes
 /// are applied after all batches finish successfully.
 ///
 /// ```
@@ -78,6 +82,7 @@ pub struct Schedule {
     accesses: Vec<SystemAccess>,
     systems: Vec<RegisteredSystem>,
     batches_dirty: bool,
+    order: Option<OrderPlan>,
 }
 
 impl Schedule {
@@ -113,6 +118,19 @@ impl Schedule {
         });
         self.batches_dirty = true;
         index
+    }
+
+    /// Replaces the explicit ordering constraints for this schedule.
+    ///
+    /// Systems registered later are unconstrained until configured again.
+    ///
+    /// # Errors
+    ///
+    /// Unknown systems or a cycle leave the previous ordering in effect.
+    pub fn configure_order(&mut self, order: &SystemOrder) -> Result<(), ScheduleConfigError> {
+        self.order = Some(order.compile(self.systems.len())?);
+        self.batches_dirty = true;
+        Ok(())
     }
 
     /// Runs the schedule and applies nonempty queues in registration order.
@@ -173,7 +191,17 @@ impl Schedule {
         if !self.batches_dirty {
             return;
         }
-        let graph = ConflictGraph::new(&self.accesses);
+        let graph = match &self.order {
+            Some(plan) => ConflictGraph::in_order(
+                &self.accesses,
+                plan.indices
+                    .iter()
+                    .copied()
+                    .chain(plan.indices.len()..self.accesses.len()),
+                plan.predecessors.clone(),
+            ),
+            None => ConflictGraph::new(&self.accesses),
+        };
         self.systems.sort_unstable_by_key(|system| system.index);
         for (number, batch) in graph.batches().enumerate() {
             for &index in batch {

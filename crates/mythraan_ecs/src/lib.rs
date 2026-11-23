@@ -29,8 +29,8 @@ pub use conflict_graph::ConflictGraph;
 pub use entity::{Entity, EntityAllocator};
 pub use error::{
     ChangeTickError, CommandError, EntityAllocError, EventReadError, EventWriteError,
-    HierarchyError, QueryError, ScheduleError, ScopeError, SparseSetError, StorageKind,
-    WorldInsertError,
+    HierarchyError, QueryError, ScheduleConfigError, ScheduleError, ScopeError, SparseSetError,
+    StorageKind, WorldInsertError,
 };
 pub use events::{EventReader, EventWriter, Events};
 pub use hierarchy::{Children, Parent};
@@ -39,7 +39,7 @@ pub use query_mut::{
     Added, Changed, FilteredQuery, QueryFilter, QueryMut, With, Without, WriteQuery,
 };
 pub use resources::{Res, ResMut, Resources};
-pub use schedule::{Schedule, SystemFlush};
+pub use schedule::{Schedule, SystemFlush, SystemOrder};
 pub use sparse_set::SparseSet;
 pub use stages::Stages;
 pub use system_access::{AccessSet, SystemAccess, SystemParam};
