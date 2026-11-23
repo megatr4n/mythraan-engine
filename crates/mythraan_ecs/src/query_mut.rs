@@ -1,11 +1,12 @@
 use std::any::{Any, TypeId, type_name};
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::ops::Bound::{Included, Unbounded};
 
 use crate::change_detection::ComponentTicks;
 use crate::component_storage::ComponentStorage;
 use crate::sparse_set::SparseIndex;
-use crate::{Entity, EntityAllocator, QueryError, SystemAccess};
+use crate::{Entity, EntityAllocator, QueryError, SystemAccess, World};
 
 mod fetch;
 mod filters;
@@ -73,6 +74,47 @@ pub(crate) fn record_data_access<Q: WriteQuery>(access: &mut SystemAccess) {
 /// A component filter or conjunction of up to four component filters.
 pub trait QueryFilter: filters::Filter {}
 impl<F: filters::Filter> QueryFilter for F {}
+
+pub(crate) fn record_filter_access<F: QueryFilter>(access: &mut SystemAccess) {
+    for request in F::requests().into_iter().flatten() {
+        access.read_component(request.id);
+    }
+}
+
+/// An exclusive world query that retains its filter type in system declarations.
+pub struct FilteredQuery<'world, Q: WriteQuery, F: QueryFilter> {
+    query: QueryMut<'world, Q>,
+    filter: PhantomData<fn() -> F>,
+}
+
+impl<'world, Q: WriteQuery, F: QueryFilter> FilteredQuery<'world, Q, F> {
+    /// Prepares a filtered query for the current tick.
+    ///
+    /// # Errors
+    /// Returns the same access conflicts as [`World::query_filtered_mut`].
+    pub fn from_world(world: &'world mut World) -> Result<Self, QueryError> {
+        Ok(Self {
+            query: world.query_filtered_mut::<Q, F>()?,
+            filter: PhantomData,
+        })
+    }
+
+    /// Prepares a filtered query whose change filters match after `after_tick`.
+    ///
+    /// # Errors
+    /// Returns the same access conflicts as [`World::query_filtered_mut_since`].
+    pub fn from_world_since(world: &'world mut World, after_tick: u64) -> Result<Self, QueryError> {
+        Ok(Self {
+            query: world.query_filtered_mut_since::<Q, F>(after_tick)?,
+            filter: PhantomData,
+        })
+    }
+
+    /// Calls `visit` with the requested components of every matching entity.
+    pub fn for_each(self, visit: impl for<'row> FnMut(Entity, Q::Item<'row>)) {
+        self.query.for_each(visit);
+    }
+}
 
 /// Visits each matching entity with the component borrows requested by the query.
 pub struct QueryMut<'world, Q: WriteQuery> {

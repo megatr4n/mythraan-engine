@@ -4,7 +4,9 @@ use std::any::TypeId;
 use std::collections::BTreeSet;
 
 use mythraan_ecs::SystemAccess;
-use mythraan_ecs::prelude::{Query, QueryMut, Res, ResMut, Resources};
+use mythraan_ecs::prelude::{
+    Added, Changed, FilteredQuery, Query, QueryMut, Res, ResMut, Resources, With, Without, World,
+};
 
 #[test]
 fn shared_queries_declare_every_component_type_once() {
@@ -70,4 +72,51 @@ fn mutable_queries_declare_writes_and_optional_reads() {
         access.components().writes(),
         &BTreeSet::from([TypeId::of::<bool>()])
     );
+}
+
+#[test]
+fn filtered_queries_declare_reads_of_filter_types() {
+    type Filters = (With<bool>, Without<u64>, Added<i32>, Changed<String>);
+    type Parameter<'world> = FilteredQuery<'world, (&'world u16, &'world mut String), Filters>;
+
+    let access = SystemAccess::of::<Parameter<'_>>();
+    assert_eq!(
+        access.components().reads(),
+        &BTreeSet::from([
+            TypeId::of::<u16>(),
+            TypeId::of::<bool>(),
+            TypeId::of::<u64>(),
+            TypeId::of::<i32>(),
+        ])
+    );
+    assert_eq!(
+        access.components().writes(),
+        &BTreeSet::from([TypeId::of::<String>()])
+    );
+}
+
+#[test]
+fn typed_filter_parameters_use_the_world_query_rules() {
+    let mut world = World::new();
+    let matching = world.spawn().unwrap();
+    let other = world.spawn().unwrap();
+    world.insert(matching, true).unwrap();
+    let checkpoint = world.change_tick();
+    world.advance_change_tick().unwrap();
+    world.insert(matching, 10_u32).unwrap();
+    world.insert(other, 20_u32).unwrap();
+    world.advance_change_tick().unwrap();
+
+    type Match<'world> = FilteredQuery<'world, &'world mut u32, (With<bool>, Added<u32>)>;
+    Match::from_world(&mut world)
+        .unwrap()
+        .for_each(|_, _| panic!("no current additions"));
+    Match::from_world_since(&mut world, checkpoint)
+        .unwrap()
+        .for_each(|entity, value| {
+            assert_eq!(entity, matching);
+            *value += 1;
+        });
+    assert_eq!(world.get::<u32>(matching), Some(&11));
+    assert_eq!(world.get::<u32>(other), Some(&20));
 }

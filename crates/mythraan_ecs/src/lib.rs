@@ -30,7 +30,9 @@ pub use error::{
 pub use events::{EventReader, EventWriter, Events};
 pub use hierarchy::{Children, Parent};
 pub use query::{Query, ReadQuery};
-pub use query_mut::{Added, Changed, QueryFilter, QueryMut, With, Without, WriteQuery};
+pub use query_mut::{
+    Added, Changed, FilteredQuery, QueryFilter, QueryMut, With, Without, WriteQuery,
+};
 pub use resources::{Res, ResMut, Resources};
 pub use sparse_set::SparseSet;
 pub use system_access::{AccessSet, SystemAccess, SystemParam};

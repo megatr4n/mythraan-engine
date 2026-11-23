@@ -1,8 +1,8 @@
 use std::any::TypeId;
 use std::collections::BTreeSet;
 
-use crate::query_mut::record_data_access;
-use crate::{Query, QueryMut, ReadQuery, Res, ResMut, WriteQuery};
+use crate::query_mut::{record_data_access, record_filter_access};
+use crate::{FilteredQuery, Query, QueryFilter, QueryMut, ReadQuery, Res, ResMut, WriteQuery};
 
 /// The types accessed in one kind of ECS storage.
 ///
@@ -97,6 +97,13 @@ impl<Q: ReadQuery> sealed::Param for Query<'_, Q> {
 impl<Q: WriteQuery> sealed::Param for QueryMut<'_, Q> {
     fn record_access(access: &mut SystemAccess) {
         record_data_access::<Q>(access);
+    }
+}
+
+impl<Q: WriteQuery, F: QueryFilter> sealed::Param for FilteredQuery<'_, Q, F> {
+    fn record_access(access: &mut SystemAccess) {
+        record_data_access::<Q>(access);
+        record_filter_access::<F>(access);
     }
 }
 
