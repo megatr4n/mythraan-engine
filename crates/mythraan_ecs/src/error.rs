@@ -7,6 +7,9 @@ use crate::Entity;
 /// A queued structural change failed during a flush.
 #[derive(Debug, Error)]
 pub enum CommandError {
+    /// An identifier could not be allocated for a queued spawn.
+    #[error(transparent)]
+    Spawn(#[from] EntityAllocError),
     /// A queued component could not be inserted.
     #[error(transparent)]
     Insert(#[from] WorldInsertError),

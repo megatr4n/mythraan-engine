@@ -1,16 +1,28 @@
+use std::sync::Arc;
+
 use crate::{CommandError, Entity, World, WorldInsertError};
 
 type Insert = dyn FnOnce(&mut World, Entity) -> Result<(), WorldInsertError> + Send + Sync;
 
 enum Command {
+    Spawn,
     Despawn(Entity),
     Insert(Entity, Box<Insert>),
     Remove(Entity, fn(&mut World, Entity)),
 }
 
 impl Command {
-    fn apply(self, world: &mut World) -> Result<(), CommandError> {
+    fn apply(
+        self,
+        world: &mut World,
+        spawned: &mut Vec<Option<Entity>>,
+    ) -> Result<(), CommandError> {
         match self {
+            Self::Spawn => {
+                let result = world.spawn();
+                spawned.push(result.as_ref().ok().copied());
+                result?;
+            }
             Self::Despawn(entity) => {
                 world.despawn(entity);
             }
@@ -18,6 +30,22 @@ impl Command {
             Self::Remove(entity, remove) => remove(world, entity),
         }
         Ok(())
+    }
+}
+
+/// A placeholder for an entity queued by [`CommandBuffer::spawn`].
+///
+/// The placeholder belongs to one batch in the buffer that issued it.
+/// Obtain its entity identifier from that batch's [`FlushReport`].
+#[derive(Clone, Debug)]
+pub struct DeferredEntity {
+    batch: Arc<()>,
+    index: usize,
+}
+
+impl DeferredEntity {
+    fn belongs_to(&self, batch: Option<&Arc<()>>) -> bool {
+        batch.is_some_and(|batch| Arc::ptr_eq(batch, &self.batch))
     }
 }
 
@@ -31,13 +59,27 @@ pub struct CommandFailure {
 }
 
 /// The outcome of applying a batch of structural commands.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[must_use = "inspect the report for failed structural commands"]
 pub struct FlushReport {
+    batch: Option<Arc<()>>,
+    spawned: Vec<Option<Entity>>,
     failures: Vec<CommandFailure>,
 }
 
 impl FlushReport {
+    /// Returns the identifier issued for a successful spawn from this batch.
+    ///
+    /// A later command in the batch may have already despawned the entity.
+    #[must_use]
+    pub fn resolve(&self, entity: &DeferredEntity) -> Option<Entity> {
+        if entity.belongs_to(self.batch.as_ref()) {
+            self.spawned.get(entity.index).copied().flatten()
+        } else {
+            None
+        }
+    }
+
     /// Returns command failures in submission order.
     #[must_use]
     pub fn failures(&self) -> &[CommandFailure] {
@@ -52,6 +94,8 @@ impl FlushReport {
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: Vec<Command>,
+    batch: Option<Arc<()>>,
+    spawn_count: usize,
 }
 
 impl CommandBuffer {
@@ -59,6 +103,18 @@ impl CommandBuffer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Queues creation of an empty entity and returns its placeholder.
+    pub fn spawn(&mut self) -> DeferredEntity {
+        let batch = self.batch.get_or_insert_with(|| Arc::new(()));
+        let entity = DeferredEntity {
+            batch: Arc::clone(batch),
+            index: self.spawn_count,
+        };
+        self.spawn_count += 1;
+        self.commands.push(Command::Spawn);
+        entity
     }
 
     /// Queues removal of an entity and its components.
@@ -91,9 +147,13 @@ impl CommandBuffer {
     /// The queue is emptied, and completed changes stay applied. Use entity
     /// identifiers from the world being flushed.
     pub fn flush(&mut self, world: &mut World) -> FlushReport {
-        let mut report = FlushReport::default();
+        let mut report = FlushReport {
+            batch: self.batch.take(),
+            spawned: Vec::with_capacity(std::mem::take(&mut self.spawn_count)),
+            failures: Vec::new(),
+        };
         for (index, command) in self.commands.drain(..).enumerate() {
-            if let Err(error) = command.apply(world) {
+            if let Err(error) = command.apply(world, &mut report.spawned) {
                 report.failures.push(CommandFailure { index, error });
             }
         }

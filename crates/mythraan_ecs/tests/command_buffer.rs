@@ -83,3 +83,45 @@ fn a_failed_insert_does_not_skip_later_commands_or_replay() {
     assert!(commands.flush(&mut world).failures().is_empty());
     assert_eq!(world.get::<u32>(live), None);
 }
+
+#[test]
+fn queued_spawns_issue_identifiers_only_at_flush() {
+    let mut world = World::new();
+    let recycled = world.spawn().unwrap();
+    assert!(world.despawn(recycled));
+
+    let mut commands = CommandBuffer::new();
+    let first = commands.spawn();
+    let second = commands.spawn();
+    let immediate = world.spawn().unwrap();
+    assert_eq!(immediate.index(), recycled.index());
+
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    let first = report.resolve(&first).unwrap();
+    let second = report.resolve(&second).unwrap();
+    assert!(immediate.index() < first.index());
+    assert!(first.index() < second.index());
+    assert!(world.is_alive(first));
+    assert!(world.is_alive(second));
+}
+
+#[test]
+fn spawn_reports_resolve_only_their_own_batch() {
+    let mut world = World::new();
+    let mut commands = CommandBuffer::new();
+    let mut other = CommandBuffer::new();
+
+    let first = commands.spawn();
+    let foreign = other.spawn();
+    let first_report = commands.flush(&mut world);
+    let second = commands.spawn();
+    let second_report = commands.flush(&mut world);
+
+    assert!(first_report.resolve(&first).is_some());
+    assert!(second_report.resolve(&second).is_some());
+    assert_eq!(first_report.resolve(&second), None);
+    assert_eq!(second_report.resolve(&first), None);
+    assert_eq!(first_report.resolve(&foreign), None);
+    assert_eq!(second_report.resolve(&foreign), None);
+}
