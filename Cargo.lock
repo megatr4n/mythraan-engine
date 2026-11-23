@@ -486,6 +486,9 @@ dependencies = [
 [[package]]
 name = "mythraan_reflect"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "notify"
