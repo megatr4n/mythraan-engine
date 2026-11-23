@@ -5,6 +5,7 @@
 
 pub mod prelude;
 
+mod command_buffer;
 mod component_storage;
 mod entity;
 mod error;
@@ -14,6 +15,7 @@ mod resources;
 mod sparse_set;
 mod world;
 
+pub use command_buffer::CommandBuffer;
 pub use entity::{Entity, EntityAllocator};
 pub use error::{EntityAllocError, QueryError, SparseSetError, WorldInsertError};
 pub use query::{Query, ReadQuery};
