@@ -9,6 +9,23 @@ use crate::Entity;
 #[error("world change tick exhausted")]
 pub struct ChangeTickError;
 
+/// A parent relationship could not be changed.
+#[derive(Debug, Error)]
+pub enum HierarchyError {
+    /// A requested child or parent is not live in this world.
+    #[error("entity {0:?} is not live in this world")]
+    EntityNotAlive(Entity),
+    /// The parent relationship would create a cycle.
+    #[error("parent relationship would create a cycle through {0:?}")]
+    Cycle(Entity),
+    /// The child list could not reserve memory.
+    #[error("could not reserve memory for a hierarchy child")]
+    Reserve(#[from] TryReserveError),
+    /// The hierarchy storage rejected an insertion.
+    #[error(transparent)]
+    Storage(#[from] SparseSetError),
+}
+
 /// An event reader was used with a different queue.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("reader belongs to a different event queue")]

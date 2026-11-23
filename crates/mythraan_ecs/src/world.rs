@@ -3,9 +3,11 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use std::num::NonZeroU64;
 
 use crate::component_storage::ComponentStorage;
+use crate::hierarchy::Hierarchy;
 use crate::{
-    ChangeTickError, Entity, EntityAllocError, EntityAllocator, Query, QueryError, QueryFilter,
-    QueryMut, ReadQuery, Resources, SparseSet, WorldInsertError, WriteQuery,
+    ChangeTickError, Children, Entity, EntityAllocError, EntityAllocator, HierarchyError, Parent,
+    Query, QueryError, QueryFilter, QueryMut, ReadQuery, Resources, SparseSet, WorldInsertError,
+    WriteQuery,
 };
 
 /// Owns the entities, components, and shared resources in a simulation.
@@ -33,6 +35,7 @@ pub struct World {
     components: BTreeMap<TypeId, Box<dyn ComponentStorage>>,
     resources: Resources,
     change_tick: NonZeroU64,
+    hierarchy: Hierarchy,
 }
 
 impl Default for World {
@@ -42,6 +45,7 @@ impl Default for World {
             components: BTreeMap::new(),
             resources: Resources::new(),
             change_tick: NonZeroU64::MIN,
+            hierarchy: Hierarchy::default(),
         }
     }
 }
@@ -101,20 +105,70 @@ impl World {
         self.entities.spawn()
     }
 
-    /// Removes an entity and all of its components.
+    /// Removes an entity, its descendants, and their components.
     ///
     /// Returns false if the entity identifier is not live. Cleanup visits each
     /// registered component storage before the entity slot can be reused.
-    /// If a component's destructor unwinds, the entity remains live and calling
-    /// this method again cleans up any remaining components.
+    /// Descendants are removed before parents. If a destructor unwinds, its
+    /// entity remains live and a retry resumes cleanup of the remaining subtree.
     pub fn despawn(&mut self, entity: Entity) -> bool {
         if !self.is_alive(entity) {
             return false;
         }
-        for storage in self.components.values_mut() {
-            storage.remove_entity(entity);
+        let mut leaf = entity;
+        loop {
+            if let Some(child) = self
+                .children(leaf)
+                .and_then(|children| children.as_slice().last())
+            {
+                leaf = *child;
+                continue;
+            }
+            for storage in self.components.values_mut() {
+                storage.remove_entity(leaf);
+            }
+            let parent = self.hierarchy.detach(leaf);
+            let removed = self.entities.despawn(leaf);
+            if leaf == entity || !removed {
+                return removed;
+            }
+            let Some(parent) = parent else {
+                return false;
+            };
+            leaf = parent;
         }
-        self.entities.despawn(entity)
+    }
+
+    /// Returns the entity's direct parent, if present.
+    #[must_use]
+    pub fn parent(&self, entity: Entity) -> Option<Parent> {
+        self.hierarchy.parent(entity)
+    }
+
+    /// Borrows the entity's direct children, if present.
+    #[must_use]
+    pub fn children(&self, entity: Entity) -> Option<&Children> {
+        self.hierarchy.children(entity)
+    }
+
+    /// Assigns a new parent or makes the child a root when given `None`.
+    ///
+    /// # Errors
+    /// Rejects stale entities, cycles, and failed storage allocations.
+    pub fn set_parent(
+        &mut self,
+        child: Entity,
+        parent: Option<Entity>,
+    ) -> Result<(), HierarchyError> {
+        if !self.is_alive(child) {
+            return Err(HierarchyError::EntityNotAlive(child));
+        }
+        if let Some(parent) = parent
+            && !self.is_alive(parent)
+        {
+            return Err(HierarchyError::EntityNotAlive(parent));
+        }
+        self.hierarchy.set_parent(child, parent)
     }
 
     /// Returns whether this entity identifier is live in the world.

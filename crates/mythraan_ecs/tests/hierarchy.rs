@@ -1,0 +1,64 @@
+//! Entity hierarchy behavior through the public ECS API.
+
+use mythraan_ecs::HierarchyError;
+use mythraan_ecs::prelude::{Parent, World};
+
+#[test]
+fn moving_a_child_updates_both_parents_and_detaching_makes_it_a_root() {
+    let mut world = World::new();
+    let first = world.spawn().unwrap();
+    let second = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    world.set_parent(child, Some(first)).unwrap();
+    world.set_parent(child, Some(first)).unwrap();
+    assert_eq!(world.children(first).unwrap().as_slice(), [child]);
+
+    world.set_parent(child, Some(second)).unwrap();
+    assert!(world.children(first).is_none());
+    assert_eq!(world.children(second).unwrap().as_slice(), [child]);
+    assert_eq!(world.parent(child).map(Parent::entity), Some(second));
+
+    world.set_parent(child, None).unwrap();
+    assert!(world.children(second).is_none());
+    assert_eq!(world.parent(child), None);
+    assert!(world.is_alive(child));
+}
+
+#[test]
+fn a_cycle_leaves_the_original_links_intact() {
+    let mut world = World::new();
+    let root = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    let leaf = world.spawn().unwrap();
+    world.set_parent(child, Some(root)).unwrap();
+    world.set_parent(leaf, Some(child)).unwrap();
+
+    for parent in [root, leaf] {
+        assert!(
+            matches!(world.set_parent(root, Some(parent)), Err(HierarchyError::Cycle(entity)) if entity == root)
+        );
+    }
+    assert_eq!(world.parent(root), None);
+    assert_eq!(world.children(root).unwrap().as_slice(), [child]);
+    assert_eq!(world.children(child).unwrap().as_slice(), [leaf]);
+}
+
+#[test]
+fn despawning_a_branch_removes_its_descendants_and_unlinks_it() {
+    let mut world = World::new();
+    let root = world.spawn().unwrap();
+    let child = world.spawn().unwrap();
+    let sibling = world.spawn().unwrap();
+    let leaf = world.spawn().unwrap();
+    world.set_parent(child, Some(root)).unwrap();
+    world.set_parent(sibling, Some(root)).unwrap();
+    world.set_parent(leaf, Some(child)).unwrap();
+    world.insert(leaf, 7_u32).unwrap();
+
+    assert!(world.despawn(child));
+    assert!(!world.is_alive(child));
+    assert!(!world.is_alive(leaf));
+    assert_eq!(world.query::<&u32>().count(), 0);
+    assert_eq!(world.children(root).unwrap().as_slice(), [sibling]);
+    assert_eq!(world.parent(sibling).map(Parent::entity), Some(root));
+}

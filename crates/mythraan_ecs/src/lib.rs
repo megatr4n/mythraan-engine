@@ -11,6 +11,7 @@ mod component_storage;
 mod entity;
 mod error;
 mod events;
+mod hierarchy;
 mod query;
 mod query_mut;
 mod resources;
@@ -22,10 +23,11 @@ pub use command_buffer::{
 };
 pub use entity::{Entity, EntityAllocator};
 pub use error::{
-    ChangeTickError, CommandError, EntityAllocError, EventReadError, EventWriteError, QueryError,
-    SparseSetError, WorldInsertError,
+    ChangeTickError, CommandError, EntityAllocError, EventReadError, EventWriteError,
+    HierarchyError, QueryError, SparseSetError, WorldInsertError,
 };
 pub use events::{EventReader, EventWriter, Events};
+pub use hierarchy::{Children, Parent};
 pub use query::{Query, ReadQuery};
 pub use query_mut::{Added, Changed, QueryFilter, QueryMut, With, Without, WriteQuery};
 pub use resources::Resources;
