@@ -135,6 +135,32 @@ impl FlushReport {
 /// changes requires exclusive access to that world.
 /// Commands can target an existing entity or a placeholder returned by this
 /// buffer in the current batch. Invalid placeholders are reported at flush.
+///
+/// ```
+/// use mythraan_ecs::prelude::{CommandBuffer, World};
+///
+/// let mut world = World::new();
+/// let source = world.spawn()?;
+/// world.insert(source, String::from("example"))?;
+///
+/// let mut commands = CommandBuffer::new();
+/// let mut copies = Vec::new();
+/// for (entity, name) in world.query::<&String>() {
+///     let copy = commands.spawn();
+///     commands.insert(&copy, name.clone());
+///     commands.despawn(entity);
+///     copies.push(copy);
+/// }
+///
+/// let report = commands.flush(&mut world);
+/// assert!(report.failures().is_empty());
+/// assert!(!world.is_alive(source));
+/// let name = copies.first()
+///     .and_then(|copy| report.resolve(copy))
+///     .and_then(|id| world.get::<String>(id));
+/// assert_eq!(name.map(String::as_str), Some("example"));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: Vec<Command>,
@@ -200,6 +226,7 @@ impl CommandBuffer {
     /// Failed commands are reported and later commands are still attempted.
     /// The queue is emptied, and completed changes stay applied. Use entity
     /// identifiers from the world being flushed.
+    /// If a component destructor unwinds, the remaining commands are discarded.
     pub fn flush(&mut self, world: &mut World) -> FlushReport {
         let mut report = FlushReport {
             batch: self.batch.take(),

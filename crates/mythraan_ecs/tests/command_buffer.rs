@@ -1,5 +1,8 @@
 //! Deferred structural changes through the public ECS API.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
+
 use mythraan_ecs::prelude::{CommandBuffer, World};
 use mythraan_ecs::{CommandError, WorldInsertError};
 
@@ -182,4 +185,91 @@ fn foreign_and_previous_batch_placeholders_cannot_target_a_local_spawn() {
     assert_eq!(world.get::<bool>(local), Some(&true));
     assert_eq!(world.get::<u32>(local), None);
     assert!(world.is_alive(previous_live));
+}
+
+#[test]
+fn mutable_queries_can_queue_all_structural_changes() {
+    let mut world = World::new();
+    let keep = world.spawn().unwrap();
+    let discard = world.spawn().unwrap();
+    world.insert(keep, 1_u32).unwrap();
+    world.insert(discard, 2_u32).unwrap();
+    world.insert(keep, true).unwrap();
+    let mut commands = CommandBuffer::new();
+    let mut replacements = Vec::new();
+
+    world
+        .query_mut::<&mut u32>()
+        .unwrap()
+        .for_each(|entity, value| {
+            *value += 10;
+            if entity == keep {
+                commands.remove::<bool>(entity);
+            } else {
+                commands.despawn(entity);
+                let replacement = commands.spawn();
+                commands.insert(&replacement, *value);
+                replacements.push(replacement);
+            }
+        });
+    assert_eq!(world.get::<u32>(keep), Some(&11));
+    assert_eq!(world.get::<u32>(discard), Some(&12));
+    assert_eq!(world.get::<bool>(keep), Some(&true));
+    assert_eq!(world.query::<&u32>().count(), 2);
+
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    let [replacement] = replacements.as_slice() else {
+        panic!("expected one queued replacement");
+    };
+    let replacement = report.resolve(replacement).unwrap();
+    assert_eq!(world.get::<bool>(keep), None);
+    assert!(!world.is_alive(discard));
+    assert_eq!(world.get::<u32>(replacement), Some(&12));
+    assert_eq!(world.query::<&u32>().count(), 2);
+}
+
+#[test]
+fn dropping_a_buffer_releases_owned_queued_components() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    let component = Arc::new(());
+    let observer = Arc::downgrade(&component);
+    let mut commands = CommandBuffer::new();
+    commands.insert(entity, component);
+
+    assert!(observer.upgrade().is_some());
+    drop(commands);
+    assert!(observer.upgrade().is_none());
+    assert!(world.get::<Arc<()>>(entity).is_none());
+}
+
+#[test]
+fn unwinding_discards_pending_commands_and_leaves_the_buffer_reusable() {
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("component destructor unwound");
+        }
+    }
+
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, PanicOnDrop).unwrap();
+    let mut commands = CommandBuffer::new();
+    commands.remove::<PanicOnDrop>(entity);
+    let interrupted = commands.spawn();
+    commands.insert(entity, 1_u32);
+
+    let result = catch_unwind(AssertUnwindSafe(|| commands.flush(&mut world)));
+    assert!(result.is_err());
+    assert!(world.get::<PanicOnDrop>(entity).is_none());
+
+    let next = commands.spawn();
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    assert_eq!(report.resolve(&interrupted), None);
+    assert!(report.resolve(&next).is_some());
+    assert_eq!(world.get::<u32>(entity), None);
 }
