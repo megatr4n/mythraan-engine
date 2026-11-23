@@ -67,3 +67,54 @@ impl<A: Send + Sync + 'static, B: Send + Sync + 'static, C: Send + Sync + 'stati
         Some((entity, (a.get(entity)?, b.get(entity)?, c.get(entity)?)))
     }
 }
+
+impl<
+    A: Send + Sync + 'static,
+    B: Send + Sync + 'static,
+    C: Send + Sync + 'static,
+    D: Send + Sync + 'static,
+> Fetch for (&A, &B, &C, &D)
+{
+    type Item<'world> = (&'world A, &'world B, &'world C, &'world D);
+    type State<'world> = (
+        (
+            &'world SparseSet<A>,
+            &'world SparseSet<B>,
+            &'world SparseSet<C>,
+            &'world SparseSet<D>,
+        ),
+        &'world [Entity],
+    );
+
+    fn prepare(world: &World) -> Option<Self::State<'_>> {
+        let a = world.storage::<A>()?;
+        let b = world.storage::<B>()?;
+        let c = world.storage::<C>()?;
+        let d = world.storage::<D>()?;
+        let candidates = [a.entities(), b.entities(), c.entities(), d.entities()]
+            .into_iter()
+            .min_by_key(|entities| entities.len())?;
+        Some(((a, b, c, d), candidates))
+    }
+
+    fn len(state: &Self::State<'_>) -> usize {
+        state.1.len()
+    }
+
+    fn row<'world>(
+        state: &Self::State<'world>,
+        position: usize,
+    ) -> Option<(Entity, Self::Item<'world>)> {
+        let entity = *state.1.get(position)?;
+        let (a, b, c, d) = state.0;
+        Some((
+            entity,
+            (
+                a.get(entity)?,
+                b.get(entity)?,
+                c.get(entity)?,
+                d.get(entity)?,
+            ),
+        ))
+    }
+}

@@ -5,6 +5,30 @@ use mythraan_ecs::prelude::{Query, World};
 #[derive(Debug, PartialEq, Eq)]
 struct Health(u32);
 
+#[derive(Debug, PartialEq, Eq)]
+struct Team(u8);
+
+#[test]
+fn quadruple_query_returns_components_in_the_requested_order() {
+    let mut world = World::new();
+    let complete = world.spawn().unwrap();
+    let partial = world.spawn().unwrap();
+    for entity in [complete, partial] {
+        world.insert(entity, Health(80)).unwrap();
+        world.insert(entity, Position(12)).unwrap();
+        world.insert(entity, Team(3)).unwrap();
+    }
+    world.insert(complete, Speed(5)).unwrap();
+
+    let values: Vec<_> = world
+        .query::<(&Team, &Speed, &Position, &Health)>()
+        .collect();
+    assert_eq!(
+        values,
+        [(complete, (&Team(3), &Speed(5), &Position(12), &Health(80)))]
+    );
+}
+
 #[test]
 fn single_query_reads_components_from_matching_entities() {
     let mut world = World::new();
