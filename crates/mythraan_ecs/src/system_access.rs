@@ -16,7 +16,7 @@ pub struct AccessSet {
 }
 
 impl AccessSet {
-    /// Returns the types accessed only through shared references.
+    /// Returns the types accessed through shared borrows or query filters.
     #[must_use]
     pub fn reads(&self) -> &BTreeSet<TypeId> {
         &self.reads
@@ -41,6 +41,31 @@ impl AccessSet {
 }
 
 /// The world storage accessed by a system's declared parameters.
+///
+/// Component and resource types occupy separate sets. Use [`FilteredQuery`]
+/// for declarations that include filters. [`QueryMut`] contributes its data
+/// columns when used as a parameter type.
+///
+/// ```
+/// use std::any::TypeId;
+/// use mythraan_ecs::prelude::{Commands, QueryMut, Res, SystemAccess};
+///
+/// struct Position;
+/// struct Velocity;
+/// struct FrameTime;
+///
+/// type Movement<'world> = (
+///     QueryMut<'world, (&'world mut Position, &'world Velocity)>,
+///     Res<'world, FrameTime>,
+///     Commands<'world>,
+/// );
+///
+/// let access = SystemAccess::of::<Movement<'_>>();
+/// assert!(access.components().writes().contains(&TypeId::of::<Position>()));
+/// assert!(access.components().reads().contains(&TypeId::of::<Velocity>()));
+/// assert!(access.resources().reads().contains(&TypeId::of::<FrameTime>()));
+/// assert!(access.uses_commands());
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemAccess {
     components: AccessSet,
@@ -69,7 +94,7 @@ impl SystemAccess {
         &self.resources
     }
 
-    /// Returns whether the system requests a deferred command buffer.
+    /// Returns whether the system requests a queue for changes at a sync point.
     #[must_use]
     pub fn uses_commands(&self) -> bool {
         self.deferred_commands

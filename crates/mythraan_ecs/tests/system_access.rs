@@ -188,3 +188,33 @@ fn parameter_lists_merge_access_and_keep_storage_kinds_distinct() {
 fn a_parameterless_system_declares_no_world_access() {
     assert_eq!(SystemAccess::of::<()>(), SystemAccess::default());
 }
+
+#[test]
+fn exclusive_access_subsumes_shared_filter_access_in_either_parameter_order() {
+    type Filter<'world> = FilteredQuery<'world, &'world bool, Changed<u32>>;
+    type Writer<'world> = QueryMut<'world, &'world mut u32>;
+
+    let first = SystemAccess::of::<(Filter<'_>, Writer<'_>)>();
+    let second = SystemAccess::of::<(Writer<'_>, Filter<'_>)>();
+    assert_eq!(first, second);
+    assert_eq!(
+        first.components().reads(),
+        &BTreeSet::from([TypeId::of::<bool>()])
+    );
+    assert_eq!(
+        first.components().writes(),
+        &BTreeSet::from([TypeId::of::<u32>()])
+    );
+}
+
+#[test]
+fn typed_filter_binding_rejects_conflicting_component_borrows() {
+    let mut world = World::new();
+    let error = FilteredQuery::<(&mut u32, &u32), With<bool>>::from_world(&mut world).err();
+    assert_eq!(
+        error,
+        Some(mythraan_ecs::QueryError {
+            component: std::any::type_name::<u32>(),
+        })
+    );
+}

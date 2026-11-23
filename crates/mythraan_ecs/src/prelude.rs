@@ -3,5 +3,5 @@
 pub use crate::{
     Added, Changed, Children, CommandBuffer, Commands, DeferredEntity, Entity, EntityAllocator,
     EventReader, EventWriter, Events, FilteredQuery, Parent, Query, QueryMut, Res, ResMut,
-    Resources, SparseSet, With, Without, World,
+    Resources, SparseSet, SystemAccess, SystemParam, With, Without, World,
 };
