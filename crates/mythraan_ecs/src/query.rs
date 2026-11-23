@@ -1,3 +1,4 @@
+use std::iter::FusedIterator;
 use std::ops::Range;
 
 use crate::{Entity, World};
@@ -51,7 +52,13 @@ impl<'world, Q: ReadQuery> Iterator for Query<'world, Q> {
         let state = self.state.as_ref()?;
         self.candidates.find_map(|position| Q::row(state, position))
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.candidates.len()))
+    }
 }
+
+impl<Q: ReadQuery> FusedIterator for Query<'_, Q> {}
 
 impl<T: Send + Sync + 'static> sealed::Fetch for &T {
     type Item<'world> = &'world T;

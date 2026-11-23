@@ -40,6 +40,39 @@ fn one_element_tuple_yields_a_single_reference_in_a_tuple() {
 }
 
 #[test]
+fn missing_and_empty_storages_produce_no_rows() {
+    let mut world = World::new();
+    assert!(world.query::<&Health>().next().is_none());
+
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Health(12)).unwrap();
+    assert!(world.query::<(&Health, &Position)>().next().is_none());
+    world.insert(entity, Position(23)).unwrap();
+    world.remove::<Position>(entity).unwrap();
+
+    let mut empty = world.query::<(&Health, &Position)>();
+    assert_eq!(empty.size_hint(), (0, Some(0)));
+    assert!(empty.next().is_none());
+}
+
+#[test]
+fn disjoint_storages_exhaust_the_query_without_matching() {
+    let mut world = World::new();
+    let first = world.spawn().unwrap();
+    let second = world.spawn().unwrap();
+    let third = world.spawn().unwrap();
+    world.insert(first, Health(20)).unwrap();
+    world.insert(second, Health(30)).unwrap();
+    world.insert(third, Position(5)).unwrap();
+
+    let mut query = world.query::<(&Health, &Position)>();
+    assert_eq!(query.size_hint(), (0, Some(1)));
+    assert!(query.next().is_none());
+    assert_eq!(query.size_hint(), (0, Some(0)));
+    assert!(query.next().is_none());
+}
+
+#[test]
 fn single_query_reads_components_from_matching_entities() {
     let mut world = World::new();
     let first = world.spawn().unwrap();
