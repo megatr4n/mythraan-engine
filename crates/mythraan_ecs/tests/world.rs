@@ -65,3 +65,22 @@ fn mutates_only_the_component_borrowed() {
     assert_eq!(world.get::<bool>(first), Some(&false));
     assert!(world.get_mut::<bool>(second).is_none());
 }
+
+#[test]
+fn removes_one_component_and_preserves_other_records() {
+    let mut world = World::new();
+    let first = world.spawn().unwrap();
+    let second = world.spawn().unwrap();
+    world.insert(first, String::from("first")).unwrap();
+    world.insert(first, 11_u32).unwrap();
+    world.insert(second, String::from("second")).unwrap();
+
+    assert_eq!(world.remove::<String>(first).as_deref(), Some("first"));
+    assert_eq!(world.remove::<String>(first), None);
+    assert_eq!(world.get::<u32>(first), Some(&11));
+    assert_eq!(
+        world.get::<String>(second).map(String::as_str),
+        Some("second")
+    );
+    assert!(world.is_alive(first));
+}

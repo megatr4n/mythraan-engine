@@ -85,10 +85,24 @@ impl World {
     /// Returns `None` if the entity is not live or lacks the component.
     #[must_use]
     pub fn get_mut<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<&mut T> {
+        self.storage_mut::<T>(entity)?.get_mut(entity)
+    }
+
+    /// Removes and returns an entity's component of the requested type.
+    ///
+    /// Returns `None` if the entity is not live or lacks the component.
+    pub fn remove<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<T> {
+        self.storage_mut::<T>(entity)?.remove(entity)
+    }
+
+    fn storage_mut<T: Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+    ) -> Option<&mut SparseSet<T>> {
         if !self.is_alive(entity) {
             return None;
         }
         let erased: &mut dyn Any = self.components.get_mut(&TypeId::of::<T>())?.as_mut();
-        erased.downcast_mut::<SparseSet<T>>()?.get_mut(entity)
+        erased.downcast_mut()
     }
 }
