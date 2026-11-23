@@ -79,4 +79,16 @@ impl World {
         let erased: &dyn Any = self.components.get(&TypeId::of::<T>())?.as_ref();
         erased.downcast_ref::<SparseSet<T>>()?.get(entity)
     }
+
+    /// Mutably borrows an entity's component of the requested type.
+    ///
+    /// Returns `None` if the entity is not live or lacks the component.
+    #[must_use]
+    pub fn get_mut<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<&mut T> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+        let erased: &mut dyn Any = self.components.get_mut(&TypeId::of::<T>())?.as_mut();
+        erased.downcast_mut::<SparseSet<T>>()?.get_mut(entity)
+    }
 }

@@ -49,3 +49,19 @@ fn reads_multiple_component_types_without_mixing_entities() {
     assert_eq!(world.get::<u32>(second), None);
     assert_eq!(world.get::<bool>(first), None);
 }
+
+#[test]
+fn mutates_only_the_component_borrowed() {
+    let mut world = World::new();
+    let first = world.spawn().unwrap();
+    let second = world.spawn().unwrap();
+    world.insert(first, 10_u32).unwrap();
+    world.insert(first, false).unwrap();
+    world.insert(second, 20_u32).unwrap();
+
+    *world.get_mut::<u32>(first).unwrap() += 1;
+    assert_eq!(world.get::<u32>(first), Some(&11));
+    assert_eq!(world.get::<u32>(second), Some(&20));
+    assert_eq!(world.get::<bool>(first), Some(&false));
+    assert!(world.get_mut::<bool>(second).is_none());
+}
