@@ -18,8 +18,8 @@ pub enum HierarchyError {
     /// The parent relationship would create a cycle.
     #[error("parent relationship would create a cycle through {0:?}")]
     Cycle(Entity),
-    /// The child list could not reserve memory.
-    #[error("could not reserve memory for a hierarchy child")]
+    /// The hierarchy could not reserve memory for the link update.
+    #[error("could not reserve memory for a hierarchy update")]
     Reserve(#[from] TryReserveError),
     /// The hierarchy storage rejected an insertion.
     #[error(transparent)]

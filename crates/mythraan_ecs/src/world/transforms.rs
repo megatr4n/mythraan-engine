@@ -32,7 +32,10 @@ impl World {
     /// # Errors
     /// Returns an error if a derived component cannot be stored.
     pub fn propagate_transforms(&mut self) -> Result<(), WorldInsertError> {
-        if !self.transforms.locals_dirty && !self.transforms.rebuild {
+        if !self.transforms.locals_dirty
+            && !self.transforms.rebuild
+            && self.hierarchy.dirty_subtrees.is_empty()
+        {
             return Ok(());
         }
         let mut pending = mem::take(&mut self.transforms.pending);
@@ -43,6 +46,7 @@ impl World {
             self.transforms.last_tick = self.change_tick();
             self.transforms.locals_dirty = false;
             self.transforms.rebuild = false;
+            self.hierarchy.dirty_subtrees.clear();
         }
         result
     }
@@ -66,6 +70,7 @@ impl World {
         );
 
         while let Some((entity, parent, mut dirty)) = pending.pop() {
+            dirty |= self.hierarchy.dirty_subtrees.contains(&entity);
             let mut global = parent;
             if let Some((&local, tick)) = self
                 .storage::<Transform>()

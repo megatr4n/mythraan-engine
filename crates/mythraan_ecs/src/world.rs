@@ -190,8 +190,7 @@ impl World {
         {
             return Err(HierarchyError::EntityNotAlive(parent));
         }
-        self.transforms.rebuild |= self.hierarchy.set_parent(child, parent)?;
-        Ok(())
+        self.hierarchy.set_parent(child, parent)
     }
 
     /// Returns whether this entity identifier is live in the world.

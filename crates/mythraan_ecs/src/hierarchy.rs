@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{Entity, HierarchyError, SparseSet};
 
 /// The direct parent of an entity, borrowed through [`crate::World::parent`].
@@ -28,6 +30,7 @@ impl Children {
 pub(crate) struct Hierarchy {
     parents: SparseSet<Parent>,
     children: SparseSet<Children>,
+    pub(crate) dirty_subtrees: HashSet<Entity>,
 }
 
 impl Hierarchy {
@@ -51,19 +54,20 @@ impl Hierarchy {
         &mut self,
         child: Entity,
         parent: Option<Entity>,
-    ) -> Result<bool, HierarchyError> {
+    ) -> Result<(), HierarchyError> {
         let old = self.parent(child).map(Parent::entity);
         if old == parent {
-            return Ok(false);
+            return Ok(());
         }
-        if let Some(parent) = parent {
-            let mut ancestor = Some(parent);
-            while let Some(entity) = ancestor {
-                if entity == child {
-                    return Err(HierarchyError::Cycle(child));
-                }
-                ancestor = self.parent(entity).map(Parent::entity);
+        let mut ancestor = parent;
+        while let Some(entity) = ancestor {
+            if entity == child {
+                return Err(HierarchyError::Cycle(child));
             }
+            ancestor = self.parent(entity).map(Parent::entity);
+        }
+        self.dirty_subtrees.try_reserve(1)?;
+        if let Some(parent) = parent {
             if let Some(children) = self.children.get_mut(parent) {
                 children.0.try_reserve(1)?;
                 self.parents.insert(child, Parent(parent))?;
@@ -84,10 +88,12 @@ impl Hierarchy {
         if let Some(old) = old {
             self.unlink(old, child);
         }
-        Ok(true)
+        self.dirty_subtrees.insert(child);
+        Ok(())
     }
 
     pub(crate) fn detach(&mut self, child: Entity) -> Option<Entity> {
+        self.dirty_subtrees.remove(&child);
         let parent = self.parents.remove(child)?.entity();
         self.unlink(parent, child);
         Some(parent)

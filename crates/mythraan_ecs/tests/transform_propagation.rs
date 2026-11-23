@@ -79,3 +79,53 @@ fn clean_passes_and_unaffected_transforms_preserve_change_ticks() {
         Vec3::Y
     );
 }
+
+#[test]
+fn reparenting_or_detaching_a_group_updates_its_transformed_descendants() {
+    let mut world = World::new();
+    let left = world.spawn().unwrap();
+    let right = world.spawn().unwrap();
+    let group = world.spawn().unwrap();
+    let leaf = world.spawn().unwrap();
+    world.set_parent(group, Some(left)).unwrap();
+    world.set_parent(leaf, Some(group)).unwrap();
+    for (entity, x) in [(left, 10.0), (right, 20.0), (leaf, 1.0)] {
+        world
+            .insert(
+                entity,
+                Transform {
+                    translation: Vec3::X * x,
+                    ..Transform::IDENTITY
+                },
+            )
+            .unwrap();
+    }
+    world.propagate_transforms().unwrap();
+    world.advance_change_tick().unwrap();
+
+    world.set_parent(group, Some(right)).unwrap();
+    world.propagate_transforms().unwrap();
+    assert_eq!(
+        world
+            .get::<GlobalTransform>(leaf)
+            .unwrap()
+            .0
+            .transform_point3(Vec3::ZERO),
+        Vec3::X * 21.0
+    );
+    world
+        .query_filtered_mut::<&GlobalTransform, Changed<GlobalTransform>>()
+        .unwrap()
+        .for_each(|entity, _| assert_eq!(entity, leaf));
+
+    world.set_parent(group, None).unwrap();
+    world.propagate_transforms().unwrap();
+    assert_eq!(
+        world
+            .get::<GlobalTransform>(leaf)
+            .unwrap()
+            .0
+            .transform_point3(Vec3::ZERO),
+        Vec3::X
+    );
+}
