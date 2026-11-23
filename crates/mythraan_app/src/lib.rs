@@ -1,4 +1,7 @@
 //! Application lifecycle and frame orchestration for Mythraan.
+//!
+//! Enable the `reflect` feature to register component types from plugins
+//! and edit their named fields through the application's world.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

@@ -1,4 +1,7 @@
 //! Entities, components, and worlds for Mythraan's entity component system.
+//!
+//! The optional `reflect` feature adds a component type registry and
+//! named field access through `World`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

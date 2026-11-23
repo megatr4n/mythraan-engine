@@ -58,7 +58,7 @@ impl World {
 
     /// Borrows a named field from a registered component on an entity.
     ///
-    /// Downcast the returned value with [`Any::downcast_ref`].
+    /// Downcast the returned value with `downcast_ref`.
     ///
     /// # Errors
     ///
@@ -83,6 +83,27 @@ impl World {
     }
 
     /// Replaces a named field and marks the component changed on success.
+    ///
+    /// ```
+    /// use std::any::type_name;
+    /// use mythraan_ecs::{World, reflection::Reflect};
+    ///
+    /// #[derive(Reflect)]
+    /// struct Health {
+    ///     points: u32,
+    /// }
+    ///
+    /// let mut world = World::new();
+    /// world.register_type::<Health>()?;
+    /// let entity = world.spawn()?;
+    /// world.insert(entity, Health { points: 100 })?;
+    /// let info = world.type_registry().get_by_name(type_name::<Health>())
+    ///     .ok_or("missing Health metadata")?;
+    /// let id = info.type_id();
+    /// world.set_reflected_field(entity, id, "points", 80_u32)?;
+    /// assert_eq!(world.reflected_field(entity, id, "points")?.downcast_ref(), Some(&80_u32));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     ///
     /// # Errors
     ///
