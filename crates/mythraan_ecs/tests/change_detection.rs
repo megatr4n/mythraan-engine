@@ -1,6 +1,6 @@
 //! Change detection through the public ECS API.
 
-use mythraan_ecs::prelude::{Added, Changed, Entity, World};
+use mythraan_ecs::prelude::{Added, Changed, Entity, With, Without, World};
 
 fn added(world: &mut World) -> Vec<Entity> {
     let mut matches = Vec::new();
@@ -146,4 +146,35 @@ fn missing_tuple_component_does_not_mark_unvisited_rows() {
             *value += 1;
         });
     assert_eq!(changed(&mut world), [matched]);
+}
+
+#[test]
+fn change_windows_compose_with_presence_filters_and_skip_unchanged_rows() {
+    let mut world = World::new();
+    let matching = world.spawn().unwrap();
+    let unchanged = world.spawn().unwrap();
+    let untagged = world.spawn().unwrap();
+    let excluded = world.spawn().unwrap();
+    for entity in [matching, unchanged, untagged, excluded] {
+        world.insert(entity, 1_u32).unwrap();
+    }
+    for entity in [matching, unchanged, excluded] {
+        world.insert(entity, true).unwrap();
+    }
+    world.insert(excluded, ()).unwrap();
+    let checkpoint = world.change_tick();
+
+    world.advance_change_tick().unwrap();
+    for entity in [matching, untagged, excluded] {
+        world.insert(entity, 2_u32).unwrap();
+    }
+    world.advance_change_tick().unwrap();
+    assert!(changed(&mut world).is_empty());
+
+    let mut matches = Vec::new();
+    world
+        .query_filtered_mut_since::<&bool, (Changed<u32>, With<bool>, Without<()>)>(checkpoint)
+        .unwrap()
+        .for_each(|entity, _| matches.push(entity));
+    assert_eq!(matches, [matching]);
 }
