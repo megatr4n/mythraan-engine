@@ -3,7 +3,7 @@
 use std::any::TypeId;
 
 use mythraan_ecs::prelude::{
-    Changed, FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess, With, World,
+    Changed, ConflictGraph, FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess, With, World,
 };
 use mythraan_ecs::{QueryError, ScopeError, StorageKind};
 use mythraan_math::glam::Vec3;
@@ -257,4 +257,34 @@ fn scoped_queries_only_mark_rows_yielded_by_the_filter() {
         .unwrap()
         .for_each(|entity, value| changed.push((entity, *value)));
     assert_eq!(changed, [(matched, 4)]);
+}
+
+#[test]
+fn graph_batches_keep_component_and_resource_borrows_independent() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, 7_u32).unwrap();
+    world.resources_mut().insert(10_u32);
+    let systems = [
+        SystemAccess::of::<QueryMut<'_, &mut u32>>(),
+        SystemAccess::of::<Res<'_, u32>>(),
+        SystemAccess::of::<()>(),
+        SystemAccess::of::<Res<'_, u32>>(),
+    ];
+    let graph = ConflictGraph::new(&systems);
+    let [batch] = graph.batches().collect::<Vec<_>>().try_into().unwrap();
+    let mut scopes = world
+        .scope_batch(batch.iter().map(|&id| &systems[id]))
+        .unwrap();
+    let [writer, first, empty, second] = scopes.as_mut_slice() else {
+        panic!("expected four scopes in registration order")
+    };
+    let first_resource = first.resources.get::<u32>().unwrap().unwrap();
+    let second_resource = second.resources.get::<u32>().unwrap().unwrap();
+    assert!(std::ptr::eq(&*first_resource, &*second_resource));
+    *writer.components.get_mut::<u32>(entity).unwrap().unwrap() += *first_resource;
+    assert!(empty.components.get::<u32>(entity).is_err());
+    drop(scopes);
+    assert_eq!(world.get::<u32>(entity), Some(&17));
+    assert!(world.scope_batch([]).unwrap().is_empty());
 }

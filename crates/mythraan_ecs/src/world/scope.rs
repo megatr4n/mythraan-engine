@@ -1,5 +1,6 @@
 use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
+use std::ops::RangeInclusive;
 
 use super::World;
 use crate::component_storage::ComponentStorage;
@@ -145,14 +146,16 @@ impl World {
         let components = split(
             StorageKind::Component,
             systems.iter().map(|system| system.components()),
-            self.components
-                .iter_mut()
-                .map(|(&id, storage)| (id, storage.as_mut())),
+            |range| {
+                self.components
+                    .range_mut(range)
+                    .map(|(&id, storage)| (id, storage.as_mut()))
+            },
         )?;
         let resources = split(
             StorageKind::Resource,
             systems.iter().map(|system| system.resources()),
-            self.resources.entries_mut(),
+            |range| self.resources.range_mut(range),
         )?;
         Ok(systems
             .into_iter()
@@ -238,11 +241,14 @@ enum Borrowers {
     Exclusive(usize),
 }
 
-fn split<'world, T: ?Sized>(
+fn split<'world, T: ?Sized + 'world, Entries>(
     storage: StorageKind,
     access: impl IntoIterator<Item = &'world AccessSet>,
-    entries: impl IntoIterator<Item = (TypeId, &'world mut T)>,
-) -> Result<Vec<Stores<'world, T>>, ScopeError> {
+    entries: impl FnOnce(RangeInclusive<TypeId>) -> Entries,
+) -> Result<Vec<Stores<'world, T>>, ScopeError>
+where
+    Entries: Iterator<Item = (TypeId, &'world mut T)>,
+{
     let mut requests = BTreeMap::new();
     let mut scopes = Vec::new();
     for (system, access) in access.into_iter().enumerate() {
@@ -266,7 +272,12 @@ fn split<'world, T: ?Sized>(
         }
     }
 
-    for (id, value) in entries {
+    let (Some((&first, _)), Some((&last, _))) =
+        (requests.first_key_value(), requests.last_key_value())
+    else {
+        return Ok(scopes);
+    };
+    for (id, value) in entries(first..=last) {
         match requests.remove(&id) {
             Some(Borrowers::Shared(readers)) => {
                 for reader in readers {

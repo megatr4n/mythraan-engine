@@ -1,6 +1,7 @@
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::mem;
+use std::ops::RangeInclusive;
 use std::ops::{Deref, DerefMut};
 
 /// Stores one shared value of each Rust type.
@@ -62,11 +63,12 @@ impl Resources {
         }
     }
 
-    pub(crate) fn entries_mut(
+    pub(crate) fn range_mut(
         &mut self,
+        range: RangeInclusive<TypeId>,
     ) -> impl Iterator<Item = (TypeId, &mut (dyn Any + Send + Sync))> {
         self.values
-            .iter_mut()
+            .range_mut(range)
             .map(|(&id, value)| (id, value.as_mut()))
     }
 
