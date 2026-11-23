@@ -1,5 +1,6 @@
 use std::any::{Any, TypeId, type_name};
 use std::collections::BTreeMap;
+use std::ops::Bound::{Included, Unbounded};
 
 use crate::component_storage::ComponentStorage;
 use crate::sparse_set::SparseIndex;
@@ -87,8 +88,13 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
         }
 
         let requested = || requests.iter().chain(&filters).flatten();
+        let keys = requested().map(|request| request.id);
+        let bounds = (
+            keys.clone().min().map_or(Unbounded, Included),
+            keys.max().map_or(Unbounded, Included),
+        );
         let mut columns: Columns<'world> = [const { None }; 8];
-        for (&id, storage) in storages.iter_mut() {
+        for (&id, storage) in storages.range_mut(bounds) {
             let Some(request) = requested().find(|request| request.id == id) else {
                 continue;
             };
@@ -130,9 +136,14 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
         let Some(state) = self.state.as_mut() else {
             return;
         };
+        let end = self
+            .filters
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |last| last + 1);
+        let filters = self.filters.get(..end).unwrap_or_default();
         let visit_entity = |entity| {
-            if self
-                .filters
+            if filters
                 .iter()
                 .flatten()
                 .all(|(index, present)| index.position(entity).is_some() == *present)
