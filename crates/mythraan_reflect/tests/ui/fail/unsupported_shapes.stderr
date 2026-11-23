@@ -1,0 +1,17 @@
+error: Reflect requires a struct with named fields
+ --> tests/ui/fail/unsupported_shapes.rs:4:8
+  |
+4 | struct Tuple(u32);
+  |        ^^^^^
+
+error: Reflect requires enum variants without fields
+ --> tests/ui/fail/unsupported_shapes.rs:8:5
+  |
+8 |     Number(u32),
+  |     ^^^^^^
+
+error: Reflect does not support unions
+  --> tests/ui/fail/unsupported_shapes.rs:12:7
+   |
+12 | union Bits {
+   |       ^^^^

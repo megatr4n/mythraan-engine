@@ -25,6 +25,7 @@ syn = "3.0.10"
 thiserror = "2.0.21"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
+trybuild = "1.0.122"
 uuid = { version = "1.29.3", default-features = false, features = ["serde"] }
 
 [workspace.lints.rust]

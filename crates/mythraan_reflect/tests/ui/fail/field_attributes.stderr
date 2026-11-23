@@ -1,0 +1,35 @@
+error: expected hidden or range
+ --> tests/ui/fail/field_attributes.rs:5:15
+  |
+5 |     #[reflect(unknown)]
+  |               ^^^^^^^
+
+error: duplicate hidden attribute
+  --> tests/ui/fail/field_attributes.rs:11:23
+   |
+11 |     #[reflect(hidden, hidden)]
+   |                       ^^^^^^
+
+error: duplicate range attribute
+  --> tests/ui/fail/field_attributes.rs:18:15
+   |
+18 |     #[reflect(range = 0..=2)]
+   |               ^^^^^
+
+error: reflection range must be nonempty
+  --> tests/ui/fail/field_attributes.rs:24:26
+   |
+24 |     #[reflect(range = 2.0..=1.0)]
+   |                          ^
+
+error: reflection range bound must be finite
+  --> tests/ui/fail/field_attributes.rs:30:26
+   |
+30 |     #[reflect(range = 0..1e999)]
+   |                          ^^^^^
+
+error: reflect attributes belong on named fields
+  --> tests/ui/fail/field_attributes.rs:35:1
+   |
+35 | #[reflect(hidden)]
+   | ^^^^^^^^^^^^^^^^^^

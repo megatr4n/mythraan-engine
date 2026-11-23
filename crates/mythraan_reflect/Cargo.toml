@@ -11,3 +11,6 @@ publish.workspace = true
 [dependencies]
 mythraan_reflect_derive.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true
