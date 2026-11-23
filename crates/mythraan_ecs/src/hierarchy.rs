@@ -1,18 +1,18 @@
 use crate::{Entity, HierarchyError, SparseSet};
 
-/// The direct parent of an entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The direct parent of an entity, borrowed through [`crate::World::parent`].
+#[derive(Debug, PartialEq, Eq)]
 pub struct Parent(Entity);
 
 impl Parent {
     /// Returns the parent's entity identifier.
     #[must_use]
-    pub const fn entity(self) -> Entity {
+    pub const fn entity(&self) -> Entity {
         self.0
     }
 }
 
-/// The direct children of an entity.
+/// The direct children of an entity, borrowed through [`crate::World::children`].
 #[derive(Debug)]
 pub struct Children(Vec<Entity>);
 
@@ -31,8 +31,8 @@ pub(crate) struct Hierarchy {
 }
 
 impl Hierarchy {
-    pub(crate) fn parent(&self, child: Entity) -> Option<Parent> {
-        self.parents.get(child).copied()
+    pub(crate) fn parent(&self, child: Entity) -> Option<&Parent> {
+        self.parents.get(child)
     }
 
     pub(crate) fn children(&self, parent: Entity) -> Option<&Children> {

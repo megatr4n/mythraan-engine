@@ -139,9 +139,9 @@ impl World {
         }
     }
 
-    /// Returns the entity's direct parent, if present.
+    /// Borrows the entity's direct parent, if present.
     #[must_use]
-    pub fn parent(&self, entity: Entity) -> Option<Parent> {
+    pub fn parent(&self, entity: Entity) -> Option<&Parent> {
         self.hierarchy.parent(entity)
     }
 
@@ -152,6 +152,21 @@ impl World {
     }
 
     /// Assigns a new parent or makes the child a root when given `None`.
+    ///
+    /// Use this method to update the parent link and both child lists together.
+    ///
+    /// ```
+    /// use mythraan_ecs::prelude::{Parent, World};
+    ///
+    /// let mut world = World::new();
+    /// let root = world.spawn()?;
+    /// let child = world.spawn()?;
+    /// world.set_parent(child, Some(root))?;
+    /// assert_eq!(world.parent(child).map(Parent::entity), Some(root));
+    /// assert!(world.despawn(root));
+    /// assert!(!world.is_alive(child));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     ///
     /// # Errors
     /// Rejects stale entities, cycles, and failed storage allocations.
