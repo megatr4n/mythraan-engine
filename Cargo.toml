@@ -12,12 +12,16 @@ publish = false
 cap-std = "3.4.6"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 glam = "0.29.3"
+mythraan_reflect_derive = { path = "crates/mythraan_reflect_derive" }
 notify = "=8.0.0"
+proc-macro2 = "1.0.107"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 puffin = { version = "0.20.0", default-features = false }
+quote = "1.0.47"
 ron = "0.12.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_test = "1.0.177"
+syn = "3.0.10"
 thiserror = "2.0.21"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }

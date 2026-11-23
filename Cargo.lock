@@ -487,7 +487,17 @@ dependencies = [
 name = "mythraan_reflect"
 version = "0.1.0"
 dependencies = [
+ "mythraan_reflect_derive",
  "thiserror",
+]
+
+[[package]]
+name = "mythraan_reflect_derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
