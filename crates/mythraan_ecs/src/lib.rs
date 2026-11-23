@@ -8,6 +8,7 @@ pub mod prelude;
 mod change_detection;
 mod command_buffer;
 mod component_storage;
+mod conflict_graph;
 mod entity;
 mod error;
 mod events;
@@ -22,6 +23,7 @@ mod world;
 pub use command_buffer::{
     CommandBuffer, CommandFailure, CommandTarget, Commands, DeferredEntity, FlushReport,
 };
+pub use conflict_graph::ConflictGraph;
 pub use entity::{Entity, EntityAllocator};
 pub use error::{
     ChangeTickError, CommandError, EntityAllocError, EventReadError, EventWriteError,
