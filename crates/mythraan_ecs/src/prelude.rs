@@ -1,3 +1,3 @@
 //! Commonly used ECS types.
 
-pub use crate::{Entity, EntityAllocator, SparseSet, World};
+pub use crate::{Entity, EntityAllocator, Resources, SparseSet, World};
