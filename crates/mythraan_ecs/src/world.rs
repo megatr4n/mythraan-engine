@@ -2,7 +2,10 @@ use std::any::{Any, TypeId, type_name};
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use crate::component_storage::ComponentStorage;
-use crate::{Entity, EntityAllocError, EntityAllocator, Resources, SparseSet, WorldInsertError};
+use crate::{
+    Entity, EntityAllocError, EntityAllocator, Query, ReadQuery, Resources, SparseSet,
+    WorldInsertError,
+};
 
 /// Owns the entities, components, and shared resources in a simulation.
 ///
@@ -91,6 +94,11 @@ impl World {
         self.entities.is_alive(entity)
     }
 
+    /// Iterates over the entities that have every component specified by the query.
+    pub fn query<Q: ReadQuery>(&self) -> Query<'_, Q> {
+        Query::new(self)
+    }
+
     /// Inserts a component and returns the previous value of the same type, if any.
     ///
     /// # Errors
@@ -132,8 +140,12 @@ impl World {
         if !self.is_alive(entity) {
             return None;
         }
+        self.storage::<T>()?.get(entity)
+    }
+
+    pub(crate) fn storage<T: Send + Sync + 'static>(&self) -> Option<&SparseSet<T>> {
         let erased: &dyn Any = self.components.get(&TypeId::of::<T>())?.as_ref();
-        erased.downcast_ref::<SparseSet<T>>()?.get(entity)
+        erased.downcast_ref()
     }
 
     /// Mutably borrows an entity's component of the requested type.

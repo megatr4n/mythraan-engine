@@ -127,6 +127,10 @@ impl<T> SparseSet<T> {
         &self.values
     }
 
+    pub(crate) fn entities(&self) -> &[Entity] {
+        &self.entities
+    }
+
     /// Iterates over the stored entities and their components.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (Entity, &T)> {
         self.entities.iter().copied().zip(&self.values)
