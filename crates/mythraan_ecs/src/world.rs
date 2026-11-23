@@ -221,9 +221,11 @@ impl World {
     /// Mutably borrows an entity's component of the requested type.
     ///
     /// Returns `None` if the entity is not live or lacks the component.
+    /// A successful borrow marks the component as changed in the current tick.
     #[must_use]
     pub fn get_mut<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<&mut T> {
-        self.storage_mut::<T>(entity)?.get_mut(entity)
+        let tick = self.change_tick();
+        self.storage_mut::<T>(entity)?.get_mut_at_tick(entity, tick)
     }
 
     /// Removes and returns an entity's component of the requested type.

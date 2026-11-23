@@ -11,6 +11,13 @@ pub struct Without<T>(PhantomData<fn() -> T>);
 /// Matches entities whose component `T` was added within the query's tick range.
 pub struct Added<T>(PhantomData<fn() -> T>);
 
+/// Matches entities whose component `T` was added, replaced, or yielded
+/// as a mutable reference within the query's tick range.
+///
+/// A mutable borrow counts as a change. Interior writes through shared
+/// references are outside this tracking.
+pub struct Changed<T>(PhantomData<fn() -> T>);
+
 pub trait Condition {
     fn request() -> Request;
 }
@@ -27,6 +34,11 @@ impl<T: Send + Sync + 'static> Condition for Without<T> {
 impl<T: Send + Sync + 'static> Condition for Added<T> {
     fn request() -> Request {
         Request::of::<T>(Access::Added)
+    }
+}
+impl<T: Send + Sync + 'static> Condition for Changed<T> {
+    fn request() -> Request {
+        Request::of::<T>(Access::Changed)
     }
 }
 

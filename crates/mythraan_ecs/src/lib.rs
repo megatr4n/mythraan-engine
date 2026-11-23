@@ -5,6 +5,7 @@
 
 pub mod prelude;
 
+mod change_detection;
 mod command_buffer;
 mod component_storage;
 mod entity;
@@ -26,7 +27,7 @@ pub use error::{
 };
 pub use events::{EventReader, EventWriter, Events};
 pub use query::{Query, ReadQuery};
-pub use query_mut::{Added, QueryFilter, QueryMut, With, Without, WriteQuery};
+pub use query_mut::{Added, Changed, QueryFilter, QueryMut, With, Without, WriteQuery};
 pub use resources::Resources;
 pub use sparse_set::SparseSet;
 pub use world::World;

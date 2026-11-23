@@ -2,13 +2,14 @@ use std::any::{Any, TypeId, type_name};
 use std::collections::BTreeMap;
 use std::ops::Bound::{Included, Unbounded};
 
+use crate::change_detection::ComponentTicks;
 use crate::component_storage::ComponentStorage;
 use crate::sparse_set::SparseIndex;
 use crate::{Entity, EntityAllocator, QueryError};
 
 mod fetch;
 mod filters;
-pub use filters::{Added, With, Without};
+pub use filters::{Added, Changed, With, Without};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Access {
@@ -18,6 +19,7 @@ enum Access {
     With,
     Without,
     Added,
+    Changed,
 }
 
 pub struct Request {
@@ -39,7 +41,7 @@ impl Request {
 pub struct Column<'world> {
     id: TypeId,
     index: SparseIndex<'world>,
-    added_ticks: &'world [u64],
+    ticks: &'world [ComponentTicks],
     shared: Option<&'world (dyn Any + Send + Sync)>,
     exclusive: Option<&'world mut (dyn Any + Send + Sync)>,
 }
@@ -105,7 +107,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             let Some(slot) = columns.iter_mut().find(|column| column.is_none()) else {
                 break;
             };
-            let (index, added_ticks, values) = storage.query_parts();
+            let (index, ticks, values) = storage.query_parts();
             let (shared, exclusive) = if request.access == Access::Write {
                 (None, Some(values))
             } else {
@@ -114,7 +116,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             *slot = Some(Column {
                 id,
                 index,
-                added_ticks,
+                ticks,
                 shared,
                 exclusive,
             });
@@ -126,12 +128,12 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             .min_by_key(|source| source.len());
         let filters = filters.map(|filter| {
             filter.map(|filter| {
-                let (index, added_ticks) = column_of(&columns, filter.id)
-                    .map(|column| (column.index, column.added_ticks))
+                let (index, ticks) = column_of(&columns, filter.id)
+                    .map(|column| (column.index, column.ticks))
                     .unwrap_or_default();
                 PreparedFilter {
                     index,
-                    added_ticks,
+                    ticks,
                     access: filter.access,
                 }
             })
@@ -176,7 +178,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
 
 struct PreparedFilter<'world> {
     index: SparseIndex<'world>,
-    added_ticks: &'world [u64],
+    ticks: &'world [ComponentTicks],
     access: Access,
 }
 
@@ -187,8 +189,11 @@ impl PreparedFilter<'_> {
             Access::With => position.is_some(),
             Access::Without => position.is_none(),
             Access::Added => position
-                .and_then(|position| self.added_ticks.get(position))
-                .is_some_and(|&tick| tick > after_tick),
+                .and_then(|position| self.ticks.get(position))
+                .is_some_and(|ticks| ticks.added > after_tick),
+            Access::Changed => position
+                .and_then(|position| self.ticks.get(position))
+                .is_some_and(|ticks| ticks.changed() > after_tick),
             _ => false,
         }
     }

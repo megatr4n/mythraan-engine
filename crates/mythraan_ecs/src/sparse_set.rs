@@ -1,6 +1,7 @@
 use std::mem;
 use std::num::NonZeroUsize;
 
+use crate::change_detection::ComponentTicks;
 use crate::{Entity, SparseSetError};
 
 #[derive(Clone, Copy, Default)]
@@ -43,7 +44,7 @@ pub struct SparseSet<T> {
     sparse: Vec<Option<NonZeroUsize>>,
     entities: Vec<Entity>,
     values: Vec<T>,
-    added_ticks: Option<Vec<u64>>,
+    ticks: Option<Vec<ComponentTicks>>,
 }
 
 impl<T> SparseSet<T> {
@@ -54,13 +55,13 @@ impl<T> SparseSet<T> {
             sparse: Vec::new(),
             entities: Vec::new(),
             values: Vec::new(),
-            added_ticks: None,
+            ticks: None,
         }
     }
 
     pub(crate) fn tracked() -> Self {
         Self {
-            added_ticks: Some(Vec::new()),
+            ticks: Some(Vec::new()),
             ..Self::new()
         }
     }
@@ -103,6 +104,9 @@ impl<T> SparseSet<T> {
             if self.entities.get(dense_index) == Some(&entity)
                 && let Some(previous) = self.values.get_mut(dense_index)
             {
+                if let Some(ticks) = self.ticks.as_ref().and_then(|ticks| ticks.get(dense_index)) {
+                    ticks.mark_changed(tick);
+                }
                 return Ok(Some(mem::replace(previous, value)));
             }
             return Err(SparseSetError::GenerationMismatch { index });
@@ -115,8 +119,8 @@ impl<T> SparseSet<T> {
             .try_reserve(required.saturating_sub(self.sparse.len()))?;
         self.entities.try_reserve(1)?;
         self.values.try_reserve(1)?;
-        if let Some(added_ticks) = &mut self.added_ticks {
-            added_ticks.try_reserve(1)?;
+        if let Some(ticks) = &mut self.ticks {
+            ticks.try_reserve(1)?;
         }
         if required > self.sparse.len() {
             self.sparse.resize(required, None);
@@ -128,8 +132,8 @@ impl<T> SparseSet<T> {
         *entry = NonZeroUsize::new(self.entities.len() + 1);
         self.entities.push(entity);
         self.values.push(value);
-        if let Some(added_ticks) = &mut self.added_ticks {
-            added_ticks.push(tick);
+        if let Some(ticks) = &mut self.ticks {
+            ticks.push(ComponentTicks::new(tick));
         }
         Ok(None)
     }
@@ -147,6 +151,15 @@ impl<T> SparseSet<T> {
         self.values.get_mut(index)
     }
 
+    pub(crate) fn get_mut_at_tick(&mut self, entity: Entity, tick: u64) -> Option<&mut T> {
+        let index = self.dense_index(entity)?;
+        let value = self.values.get_mut(index)?;
+        if let Some(ticks) = self.ticks.as_ref().and_then(|ticks| ticks.get(index)) {
+            ticks.mark_changed(tick);
+        }
+        Some(value)
+    }
+
     /// Removes and returns the component for this entity in O(1) time.
     pub fn remove(&mut self, entity: Entity) -> Option<T> {
         let index = self.dense_index(entity)?;
@@ -155,8 +168,8 @@ impl<T> SparseSet<T> {
 
         self.entities.swap_remove(index);
         let value = self.values.swap_remove(index);
-        if let Some(added_ticks) = &mut self.added_ticks {
-            added_ticks.swap_remove(index);
+        if let Some(ticks) = &mut self.ticks {
+            ticks.swap_remove(index);
         }
         if let Some(moved) = self.entities.get(index)
             && let Some(entry) = self.sparse.get_mut(moved.index() as usize)
@@ -176,14 +189,14 @@ impl<T> SparseSet<T> {
         &self.entities
     }
 
-    pub(crate) fn query_parts(&mut self) -> (SparseIndex<'_>, &[u64], &mut Vec<T>) {
+    pub(crate) fn query_parts(&mut self) -> (SparseIndex<'_>, &[ComponentTicks], &mut Vec<T>) {
         let index = SparseIndex {
             sparse: &self.sparse,
             entities: &self.entities,
         };
         (
             index,
-            self.added_ticks.as_deref().unwrap_or_default(),
+            self.ticks.as_deref().unwrap_or_default(),
             &mut self.values,
         )
     }
