@@ -132,3 +132,68 @@ fn invalid_set_references_and_self_dependencies_are_rejected() {
         Err(ScheduleConfigError::Cycle)
     );
 }
+
+#[test]
+fn run_conditions_see_predecessor_writes_and_skipped_systems_queue_nothing() {
+    let mut world = World::new();
+    world.resources_mut().insert(true);
+    let entity = world.spawn().unwrap();
+    let mut schedule = Schedule::new();
+    let target = schedule.add_system(SystemAccess::of::<Commands<'_>>(), move |_, commands| {
+        commands.unwrap().insert(entity, 7_u8);
+        Ok(())
+    });
+    let toggle = schedule.add_system(SystemAccess::of::<ResMut<'_, bool>>(), |mut scope, _| {
+        let mut enabled = scope.resources.get_mut::<bool>()?.unwrap();
+        *enabled = !*enabled;
+        Ok(())
+    });
+    schedule
+        .configure_order(SystemOrder::new().after(target, toggle))
+        .unwrap();
+    schedule
+        .run_if(target, |world| {
+            world.resources().get::<bool>() == Some(&true)
+        })
+        .unwrap();
+    assert_eq!(
+        schedule.run_if(usize::MAX, |_| true),
+        Err(ScheduleConfigError::UnknownSystem(usize::MAX))
+    );
+
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert!(world.get::<u8>(entity).is_none());
+    let reports = schedule.run(&mut world).unwrap();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].system, target);
+    assert_eq!(world.get::<u8>(entity), Some(&7));
+}
+
+#[test]
+fn run_conditions_in_one_batch_share_the_state_before_its_systems_run() {
+    let mut world = World::new();
+    world.resources_mut().insert(false);
+    let mut schedule = Schedule::new();
+    schedule.add_system(SystemAccess::of::<ResMut<'_, bool>>(), |mut scope, _| {
+        *scope.resources.get_mut::<bool>()?.unwrap() = true;
+        Ok(())
+    });
+    let runs = Arc::new(AtomicUsize::new(0));
+    let record = Arc::clone(&runs);
+    let target = schedule.add_system(SystemAccess::of::<()>(), move |_, _| {
+        record.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    schedule
+        .run_if(target, |world| {
+            world.resources().get::<bool>() == Some(&true)
+        })
+        .unwrap();
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+    schedule.run_if(target, |_| false).unwrap();
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+}

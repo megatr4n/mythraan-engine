@@ -18,11 +18,15 @@ type Callback = dyn for<'world, 'queue> FnMut(
     + Send
     + Sync;
 
+type RunCondition = dyn FnMut(&World) -> bool + Send + Sync;
+
 struct RegisteredSystem {
     index: usize,
     batch: usize,
     callback: Box<Callback>,
     commands: Option<CommandBuffer>,
+    condition: Option<Box<RunCondition>>,
+    enabled: bool,
 }
 
 impl RegisteredSystem {
@@ -115,6 +119,8 @@ impl Schedule {
             batch: 0,
             callback: Box::new(callback),
             commands,
+            condition: None,
+            enabled: true,
         });
         self.batches_dirty = true;
         index
@@ -130,6 +136,28 @@ impl Schedule {
     pub fn configure_order(&mut self, order: &SystemOrder) -> Result<(), ScheduleConfigError> {
         self.order = Some(order.compile(self.systems.len())?);
         self.batches_dirty = true;
+        Ok(())
+    }
+
+    /// Sets or replaces a system's run condition.
+    ///
+    /// Conditions read the world before any system in their batch runs.
+    /// A skipped system keeps its ordering constraints.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the system index is unknown.
+    pub fn run_if(
+        &mut self,
+        index: usize,
+        condition: impl FnMut(&World) -> bool + Send + Sync + 'static,
+    ) -> Result<(), ScheduleConfigError> {
+        let system = self
+            .systems
+            .iter_mut()
+            .find(|system| system.index == index)
+            .ok_or(ScheduleConfigError::UnknownSystem(index))?;
+        system.condition = Some(Box::new(condition));
         Ok(())
     }
 
@@ -152,16 +180,32 @@ impl Schedule {
     pub fn run(&mut self, world: &mut World) -> Result<Vec<SystemFlush>, ScheduleError> {
         self.prepare_batches();
         let accesses = &self.accesses;
+        let empty_access = SystemAccess::default();
         let mut pending = Vec::new();
         let mut completed = Vec::<Result<_, ScheduleError>>::new();
         for batch in self.systems.chunk_by_mut(|a, b| a.batch == b.batch) {
-            let declared = batch.iter().filter_map(|system| accesses.get(system.index));
+            for system in batch.iter_mut() {
+                if let Some(condition) = system.condition.as_mut() {
+                    system.enabled = condition(world);
+                }
+            }
+            let declared = batch.iter().filter_map(|system| {
+                if system.enabled {
+                    accesses.get(system.index)
+                } else {
+                    Some(&empty_access)
+                }
+            });
             let scopes = world.scope_batch(declared)?;
             batch
                 .par_iter_mut()
                 .zip(scopes)
                 .map(|(system, scope)| {
-                    let commands = system.execute(scope)?;
+                    let commands = if system.enabled {
+                        system.execute(scope)?
+                    } else {
+                        None
+                    };
                     Ok((system, commands))
                 })
                 .collect_into_vec(&mut completed);
