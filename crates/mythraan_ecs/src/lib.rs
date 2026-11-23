@@ -18,6 +18,7 @@ mod query_mut;
 mod resources;
 mod schedule;
 mod sparse_set;
+mod stages;
 mod system_access;
 mod world;
 
@@ -40,5 +41,6 @@ pub use query_mut::{
 pub use resources::{Res, ResMut, Resources};
 pub use schedule::{Schedule, SystemFlush};
 pub use sparse_set::SparseSet;
+pub use stages::Stages;
 pub use system_access::{AccessSet, SystemAccess, SystemParam};
 pub use world::{ScopedComponents, ScopedResources, SystemScope, World};
