@@ -146,7 +146,20 @@ impl World {
     pub fn query_filtered_mut<Q: WriteQuery, F: QueryFilter>(
         &mut self,
     ) -> Result<QueryMut<'_, Q>, QueryError> {
-        let after_tick = self.change_tick() - 1;
+        self.query_filtered_mut_since::<Q, F>(self.change_tick() - 1)
+    }
+
+    /// Prepares a filtered query whose change filters match ticks after `after_tick`.
+    ///
+    /// Use a tick from this world. Pass zero to include every recorded tick.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same access conflict as [`Self::query_mut`].
+    pub fn query_filtered_mut_since<Q: WriteQuery, F: QueryFilter>(
+        &mut self,
+        after_tick: u64,
+    ) -> Result<QueryMut<'_, Q>, QueryError> {
         QueryMut::new(
             &self.entities,
             &mut self.components,

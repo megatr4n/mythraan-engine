@@ -34,12 +34,21 @@ fn adding_and_replacing_are_distinct_across_ticks() {
     world.insert(existing, 10_u32).unwrap();
     assert_eq!(added(&mut world), [existing]);
 
+    let prior = world.change_tick();
     world.advance_change_tick().unwrap();
     world.insert(existing, 11_u32).unwrap();
     world.insert(new, 20_u32).unwrap();
     assert_eq!(added(&mut world), [new]);
 
     world.advance_change_tick().unwrap();
+    let mut matches = Vec::new();
+    world
+        .query_filtered_mut_since::<&u32, Added<u32>>(prior)
+        .unwrap()
+        .for_each(|entity, _| {
+            matches.push(entity);
+        });
+    assert_eq!(matches, [new]);
     assert!(added(&mut world).is_empty());
 }
 
