@@ -20,3 +20,29 @@ fn single_query_reads_components_from_matching_entities() {
     values.sort_unstable_by_key(|(entity, _)| entity.index());
     assert_eq!(values, [(first, 40), (second, 80)]);
 }
+
+#[derive(Debug, PartialEq, Eq)]
+struct Position(i32);
+
+#[test]
+fn pair_query_joins_components_by_entity() {
+    let mut world = World::new();
+    let first = world.spawn().unwrap();
+    let second = world.spawn().unwrap();
+    let health_only = world.spawn().unwrap();
+    let position_only = world.spawn().unwrap();
+    world.insert(first, Health(40)).unwrap();
+    world.insert(second, Health(80)).unwrap();
+    world.insert(health_only, Health(10)).unwrap();
+    world.insert(second, Position(22)).unwrap();
+    world.insert(position_only, Position(50)).unwrap();
+    world.insert(first, Position(11)).unwrap();
+
+    let mut values: Vec<_> = world
+        .query::<(&Health, &Position)>()
+        .map(|(entity, (health, position))| (entity, health.0, position.0))
+        .collect();
+    values.sort_unstable_by_key(|(entity, _, _)| entity.index());
+    assert_eq!(values, [(first, 40, 11), (second, 80, 22)]);
+    assert_eq!(world.query::<(&Position, &Health)>().count(), 2);
+}

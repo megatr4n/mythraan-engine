@@ -2,6 +2,8 @@ use std::ops::Range;
 
 use crate::{Entity, World};
 
+mod tuples;
+
 mod sealed {
     use crate::{Entity, World};
 
