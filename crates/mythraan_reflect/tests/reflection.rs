@@ -3,7 +3,7 @@
 use std::any::{TypeId, type_name};
 
 use mythraan_reflect::RegisterTypeError;
-use mythraan_reflect::prelude::{FieldInfo, Reflect, TypeInfo, TypeRegistry};
+use mythraan_reflect::prelude::{FieldInfo, FieldRange, Reflect, TypeInfo, TypeRegistry};
 
 #[derive(Default)]
 struct LightSettings {
@@ -26,6 +26,21 @@ struct Marker;
 impl Reflect for Marker {
     fn fields() -> &'static [FieldInfo] {
         &[]
+    }
+}
+
+enum LightMode {
+    On,
+    Off,
+}
+
+impl Reflect for LightMode {
+    fn fields() -> &'static [FieldInfo] {
+        &[]
+    }
+
+    fn variants() -> &'static [&'static str] {
+        &["On", "Off"]
     }
 }
 
@@ -58,6 +73,36 @@ fn describes_types_without_fields() {
     let info = TypeInfo::of::<Marker>();
     assert_eq!(info.type_id(), TypeId::of::<Marker>());
     assert!(info.fields().is_empty());
+    assert!(info.variants().is_empty());
+}
+
+#[test]
+fn describes_unit_variants() {
+    let modes = [LightMode::On, LightMode::Off];
+    let info = TypeInfo::of::<LightMode>();
+    assert_eq!(info.variants(), ["On", "Off"]);
+    assert_eq!(info.variants().len(), modes.len());
+}
+
+#[test]
+fn stores_visibility_and_valid_numeric_bounds() {
+    let field = FieldInfo::new::<f32>("intensity");
+    assert!(!field.is_hidden());
+    assert_eq!(field.range(), None);
+
+    let field = field
+        .with_hidden()
+        .with_range(FieldRange::new(-1.0, 1.0, false));
+    let range = field.range().unwrap();
+    assert!(field.is_hidden());
+    assert_eq!(
+        (range.min(), range.max(), range.is_inclusive()),
+        (-1.0, 1.0, false)
+    );
+    assert!(FieldRange::new(1.0, 1.0, true).is_some());
+    assert!(FieldRange::new(1.0, 1.0, false).is_none());
+    assert!(FieldRange::new(2.0, 1.0, true).is_none());
+    assert!(FieldRange::new(0.0, f64::INFINITY, true).is_none());
 }
 
 #[test]

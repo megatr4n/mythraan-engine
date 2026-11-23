@@ -1,3 +1,3 @@
 //! Commonly used reflection types.
 
-pub use crate::{FieldInfo, Reflect, TypeInfo, TypeRegistry};
+pub use crate::{FieldInfo, FieldRange, Reflect, TypeInfo, TypeRegistry};
