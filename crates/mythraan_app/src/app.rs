@@ -15,6 +15,23 @@ pub trait Plugin {
 }
 
 /// Owns an ECS world and its standard frame schedules.
+///
+/// ```
+/// use mythraan_app::prelude::{App, Plugin, Time};
+///
+/// struct GamePlugin;
+///
+/// impl Plugin for GamePlugin {
+///     fn build(&self, app: &mut App) {
+///         app.insert_resource(String::from("ready"));
+///     }
+/// }
+///
+/// let mut app = App::new();
+/// app.add_plugin(GamePlugin).run_headless(2, Time::FIXED_STEP)?;
+/// assert_eq!(app.world().resources().get::<Time>().map(Time::frame), Some(2));
+/// # Ok::<(), mythraan_app::AppError>(())
+/// ```
 pub struct App {
     world: World,
     stages: Stages<Stage>,

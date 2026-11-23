@@ -515,6 +515,7 @@ name = "mythraan_app"
 version = "0.1.0"
 dependencies = [
  "mythraan_ecs",
+ "mythraan_math",
  "thiserror",
 ]
 

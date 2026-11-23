@@ -11,3 +11,6 @@ publish.workspace = true
 [dependencies]
 mythraan_ecs.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+mythraan_math.workspace = true
