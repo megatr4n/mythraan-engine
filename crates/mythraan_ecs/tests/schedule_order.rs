@@ -197,3 +197,33 @@ fn run_conditions_in_one_batch_share_the_state_before_its_systems_run() {
     assert!(schedule.run(&mut world).unwrap().is_empty());
     assert_eq!(runs.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn reordered_systems_still_flush_commands_in_registration_order() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    let mut schedule = Schedule::new();
+    let access = SystemAccess::of::<(Query<'_, &u8>, Commands<'_>)>();
+    let first = schedule.add_system(access.clone(), move |scope, commands| {
+        assert!(scope.components.get::<u8>(entity)?.is_none());
+        commands.unwrap().insert(entity, 1_u8);
+        Ok(())
+    });
+    let second = schedule.add_system(access, move |scope, commands| {
+        assert!(scope.components.get::<u8>(entity)?.is_none());
+        commands.unwrap().insert(entity, 2_u8);
+        Ok(())
+    });
+    schedule
+        .configure_order(SystemOrder::new().before(second, first))
+        .unwrap();
+    let reports = schedule.run(&mut world).unwrap();
+    assert_eq!(
+        reports
+            .iter()
+            .map(|report| report.system)
+            .collect::<Vec<_>>(),
+        [first, second]
+    );
+    assert_eq!(world.get::<u8>(entity), Some(&2));
+}

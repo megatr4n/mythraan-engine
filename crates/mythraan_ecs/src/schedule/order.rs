@@ -3,6 +3,32 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::ScheduleConfigError;
 
 /// Explicit ordering constraints applied with [`crate::Schedule::configure_order`].
+///
+/// ```
+/// use mythraan_ecs::prelude::{ResMut, Schedule, SystemAccess, SystemOrder, World};
+///
+/// let mut schedule = Schedule::new();
+/// let access = SystemAccess::of::<ResMut<'_, u32>>();
+/// let finish = schedule.add_system(access.clone(), |mut scope, _| {
+///     if let Some(mut value) = scope.resources.get_mut::<u32>()? {
+///         *value += 1;
+///     }
+///     Ok(())
+/// });
+/// let reset = schedule.add_system(access, |mut scope, _| {
+///     if let Some(mut value) = scope.resources.get_mut::<u32>()? {
+///         *value = 10;
+///     }
+///     Ok(())
+/// });
+/// let mut order = SystemOrder::new();
+/// schedule.configure_order(order.set("prepare", [reset]).before("prepare", finish))?;
+/// let mut world = World::new();
+/// world.resources_mut().insert(0_u32);
+/// assert!(schedule.run(&mut world)?.is_empty());
+/// assert_eq!(world.resources().get::<u32>(), Some(&11));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Default)]
 pub struct SystemOrder {
     sets: BTreeMap<&'static str, Vec<usize>>,

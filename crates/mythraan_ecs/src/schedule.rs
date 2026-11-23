@@ -129,6 +129,8 @@ impl Schedule {
     /// Replaces the explicit ordering constraints for this schedule.
     ///
     /// Systems registered later are unconstrained until configured again.
+    /// The explicit order takes precedence over default ordering of conflicting systems.
+    /// Deferred command queues are still flushed in registration order.
     ///
     /// # Errors
     ///
@@ -176,7 +178,7 @@ impl Schedule {
     ///
     /// # Panics
     ///
-    /// A panic in a system propagates before any queued commands are applied.
+    /// A panic in a system or its run condition propagates before any queued commands are applied.
     pub fn run(&mut self, world: &mut World) -> Result<Vec<SystemFlush>, ScheduleError> {
         self.prepare_batches();
         let accesses = &self.accesses;
