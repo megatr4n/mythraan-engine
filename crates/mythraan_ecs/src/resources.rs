@@ -42,4 +42,10 @@ impl Resources {
     pub fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
         self.values.get_mut(&TypeId::of::<T>())?.downcast_mut()
     }
+
+    /// Removes and returns the resource of the requested type if it is present.
+    pub fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
+        let removed = self.values.remove(&TypeId::of::<T>())?;
+        removed.downcast::<T>().ok().map(|value| *value)
+    }
 }
