@@ -11,6 +11,60 @@ struct Player;
 struct Frozen;
 
 #[test]
+fn optional_queries_respect_filters_on_live_entities() {
+    let mut world = World::new();
+    let marked = world.spawn().unwrap();
+    let empty = world.spawn().unwrap();
+    let dead = world.spawn().unwrap();
+    world.insert(marked, Player).unwrap();
+    assert!(world.despawn(dead));
+
+    let mut matches = Vec::new();
+    world
+        .query_filtered_mut::<Option<&Velocity>, With<Player>>()
+        .unwrap()
+        .for_each(|id, velocity| {
+            assert!(velocity.is_none());
+            matches.push(id);
+        });
+    assert_eq!(matches, [marked]);
+    matches.clear();
+    world
+        .query_filtered_mut::<Option<&Velocity>, Without<Player>>()
+        .unwrap()
+        .for_each(|id, velocity| {
+            assert!(velocity.is_none());
+            matches.push(id);
+        });
+    assert_eq!(matches, [empty]);
+}
+
+#[test]
+fn a_missing_required_store_or_impossible_filter_yields_no_rows() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Position(10)).unwrap();
+
+    world
+        .query_mut::<(&mut Position, &Velocity)>()
+        .unwrap()
+        .for_each(|_, _| {
+            panic!("the required velocity store is missing");
+        });
+    world
+        .query_filtered_mut::<&mut Position, With<Frozen>>()
+        .unwrap()
+        .for_each(|_, _| {
+            panic!("the required frozen store is missing");
+        });
+    world
+        .query_filtered_mut::<&mut Position, (With<Position>, Without<Position>)>()
+        .unwrap()
+        .for_each(|_, _| panic!("a row cannot both have and lack a position"));
+    assert_eq!(world.get::<Position>(entity), Some(&Position(10)));
+}
+
+#[test]
 fn optional_reads_work_with_two_mutable_columns() {
     struct Updates(u32);
 
