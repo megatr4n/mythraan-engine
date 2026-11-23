@@ -4,9 +4,17 @@ use thiserror::Error;
 
 use crate::Entity;
 
+/// An event reader was used with a different queue.
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("reader belongs to a different event queue")]
+pub struct EventReadError;
+
 /// An event could not be queued.
 #[derive(Debug, Error)]
 pub enum EventWriteError {
+    /// All event sequence numbers have been used.
+    #[error("event sequence exhausted")]
+    SequenceExhausted,
     /// Memory could not be reserved for the event.
     #[error("could not reserve memory for an event")]
     Reserve(#[from] TryReserveError),
