@@ -1,10 +1,11 @@
 use std::any::{Any, TypeId, type_name};
 use std::collections::{BTreeMap, btree_map::Entry};
+use std::num::NonZeroU64;
 
 use crate::component_storage::ComponentStorage;
 use crate::{
-    Entity, EntityAllocError, EntityAllocator, Query, QueryError, QueryFilter, QueryMut, ReadQuery,
-    Resources, SparseSet, WorldInsertError, WriteQuery,
+    ChangeTickError, Entity, EntityAllocError, EntityAllocator, Query, QueryError, QueryFilter,
+    QueryMut, ReadQuery, Resources, SparseSet, WorldInsertError, WriteQuery,
 };
 
 /// Owns the entities, components, and shared resources in a simulation.
@@ -27,11 +28,22 @@ use crate::{
 /// assert!(world.get::<Health>(entity).is_none());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Default)]
 pub struct World {
     entities: EntityAllocator,
     components: BTreeMap<TypeId, Box<dyn ComponentStorage>>,
     resources: Resources,
+    change_tick: NonZeroU64,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self {
+            entities: EntityAllocator::new(),
+            components: BTreeMap::new(),
+            resources: Resources::new(),
+            change_tick: NonZeroU64::MIN,
+        }
+    }
 }
 
 impl World {
@@ -39,6 +51,23 @@ impl World {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the current change tick of this world. The first tick is 1.
+    #[must_use]
+    pub fn change_tick(&self) -> u64 {
+        self.change_tick.get()
+    }
+
+    /// Starts the next change tick and returns its value.
+    ///
+    /// Choose when to advance the tick for your simulation.
+    ///
+    /// # Errors
+    /// Returns an error if advancing would overflow the tick counter.
+    pub fn advance_change_tick(&mut self) -> Result<u64, ChangeTickError> {
+        self.change_tick = self.change_tick.checked_add(1).ok_or(ChangeTickError)?;
+        Ok(self.change_tick())
     }
 
     /// Borrows the shared resources owned by this world.

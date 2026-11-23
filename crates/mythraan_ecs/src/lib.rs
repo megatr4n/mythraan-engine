@@ -21,8 +21,8 @@ pub use command_buffer::{
 };
 pub use entity::{Entity, EntityAllocator};
 pub use error::{
-    CommandError, EntityAllocError, EventReadError, EventWriteError, QueryError, SparseSetError,
-    WorldInsertError,
+    ChangeTickError, CommandError, EntityAllocError, EventReadError, EventWriteError, QueryError,
+    SparseSetError, WorldInsertError,
 };
 pub use events::{EventReader, EventWriter, Events};
 pub use query::{Query, ReadQuery};

@@ -4,6 +4,11 @@ use thiserror::Error;
 
 use crate::Entity;
 
+/// The world used every available change tick.
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("world change tick exhausted")]
+pub struct ChangeTickError;
+
 /// An event reader was used with a different queue.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("reader belongs to a different event queue")]
