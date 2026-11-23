@@ -48,3 +48,37 @@ fn fixed_systems_receive_step_time_and_variable_systems_receive_frame_time() {
     assert_eq!(variable.fixed_ticks(), 3);
     assert_eq!(app.world().change_tick(), start_tick + 1);
 }
+
+#[test]
+fn fixed_time_accumulates_across_short_frames_and_caps_long_frames() {
+    let mut app = App::new();
+    app.set_max_substeps(2);
+    let time = |app: &App| *app.world().resources().get::<Time>().unwrap();
+
+    app.update(Duration::from_millis(10)).unwrap();
+    assert_eq!(time(&app).fixed_ticks(), 0);
+    assert!((time(&app).interpolation_alpha() - 0.6).abs() < f64::EPSILON);
+    app.update(Duration::from_millis(10)).unwrap();
+    assert_eq!(time(&app).fixed_ticks(), 1);
+    assert!((time(&app).interpolation_alpha() - 0.2).abs() < f64::EPSILON);
+
+    app.update(Duration::from_secs(5)).unwrap();
+    assert_eq!(time(&app).fixed_ticks(), 3);
+    assert_eq!(time(&app).interpolation_alpha(), 0.0);
+    app.update(Duration::ZERO).unwrap();
+    assert_eq!(time(&app).fixed_ticks(), 3);
+    app.set_max_substeps(0).update(Duration::MAX).unwrap();
+    assert_eq!(time(&app).fixed_ticks(), 3);
+    assert_eq!(time(&app).elapsed(), Duration::MAX);
+}
+
+#[test]
+fn an_exact_second_runs_sixty_steps_without_rounding_drift() {
+    let mut app = App::new();
+    app.set_max_substeps(60)
+        .update(Duration::from_secs(1))
+        .unwrap();
+    let time = app.world().resources().get::<Time>().unwrap();
+    assert_eq!(time.fixed_ticks(), 60);
+    assert_eq!(time.interpolation_alpha(), 0.0);
+}
