@@ -86,3 +86,22 @@ fn stale_links_cannot_reparent_or_unlink_live_entities() {
     assert_eq!(world.parent(replacement), None);
     assert_eq!(world.children(root).unwrap().as_slice(), [child]);
 }
+
+#[test]
+fn a_deep_hierarchy_is_despawned_without_call_stack_recursion() {
+    const DEPTH: usize = 16_384;
+    let mut world = World::new();
+    let mut root = world.spawn().unwrap();
+    let mut lineage = Vec::with_capacity(DEPTH);
+    lineage.push(root);
+    for _ in 1..DEPTH {
+        let parent = world.spawn().unwrap();
+        world.set_parent(root, Some(parent)).unwrap();
+        lineage.push(parent);
+        root = parent;
+    }
+
+    assert!(world.despawn(root));
+    assert!(lineage.into_iter().all(|entity| !world.is_alive(entity)));
+    assert!(world.children(root).is_none());
+}
