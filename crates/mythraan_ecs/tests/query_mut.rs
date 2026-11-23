@@ -11,6 +11,53 @@ struct Player;
 struct Frozen;
 
 #[test]
+fn optional_reads_work_with_two_mutable_columns() {
+    struct Updates(u32);
+
+    let mut world = World::new();
+    let with_velocity = world.spawn().unwrap();
+    let without_velocity = world.spawn().unwrap();
+    for entity in [with_velocity, without_velocity] {
+        world.insert(entity, Position(10)).unwrap();
+        world.insert(entity, Updates(0)).unwrap();
+        world.insert(entity, Player).unwrap();
+    }
+    world.insert(with_velocity, Velocity(5)).unwrap();
+
+    world
+        .query_mut::<(&Player, &mut Position, Option<&Velocity>, &mut Updates)>()
+        .unwrap()
+        .for_each(|_, (_, position, velocity, updates)| {
+            position.0 += velocity.map_or(1, |velocity| velocity.0);
+            updates.0 += 1;
+        });
+    assert_eq!(world.get::<Position>(with_velocity), Some(&Position(15)));
+    assert_eq!(world.get::<Position>(without_velocity), Some(&Position(11)));
+    for entity in [with_velocity, without_velocity] {
+        assert_eq!(
+            world.get::<Updates>(entity).map(|updates| updates.0),
+            Some(1)
+        );
+    }
+}
+
+#[test]
+fn duplicate_shared_fields_are_allowed() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Position(7)).unwrap();
+    let mut count = 0;
+    world
+        .query_mut::<(&Position, Option<&Position>)>()
+        .unwrap()
+        .for_each(|_, (left, right)| {
+            assert!(std::ptr::eq(left, right.unwrap()));
+            count += 1;
+        });
+    assert_eq!(count, 1);
+}
+
+#[test]
 fn combined_filters_update_only_matching_entities() {
     let mut world = World::new();
     let moving = world.spawn().unwrap();
