@@ -6,6 +6,7 @@ use crate::{Entity, SparseSet};
 
 pub(crate) trait ComponentStorage: Any + Send + Sync {
     fn remove_entity(&mut self, entity: Entity);
+    fn query_parts_ref(&self) -> (SparseIndex<'_>, &[ComponentTicks], &(dyn Any + Send + Sync));
     fn query_parts(
         &mut self,
     ) -> (
@@ -18,6 +19,11 @@ pub(crate) trait ComponentStorage: Any + Send + Sync {
 impl<T: Send + Sync + 'static> ComponentStorage for SparseSet<T> {
     fn remove_entity(&mut self, entity: Entity) {
         drop(self.remove(entity));
+    }
+
+    fn query_parts_ref(&self) -> (SparseIndex<'_>, &[ComponentTicks], &(dyn Any + Send + Sync)) {
+        let (index, ticks, values) = self.query_parts_ref();
+        (index, ticks, values)
     }
 
     fn query_parts(

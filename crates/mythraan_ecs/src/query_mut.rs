@@ -1,11 +1,11 @@
 use std::any::{Any, TypeId, type_name};
-use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::ops::Bound::{Included, Unbounded};
+use std::ops::Bound::{self, Included, Unbounded};
 
 use crate::change_detection::ComponentTicks;
 use crate::component_storage::ComponentStorage;
 use crate::sparse_set::SparseIndex;
+use crate::world::Borrowed;
 use crate::{Entity, EntityAllocator, QueryError, SystemAccess, World};
 
 mod fetch;
@@ -49,6 +49,7 @@ pub struct Column<'world> {
 
 type Columns<'world> = [Option<Column<'world>>; 8];
 type Requests = [Option<Request>; 4];
+type StorageBounds = (Bound<TypeId>, Bound<TypeId>);
 
 fn requests(input: impl IntoIterator<Item = Request>) -> Requests {
     let mut input = input.into_iter();
@@ -126,14 +127,17 @@ pub struct QueryMut<'world, Q: WriteQuery> {
 }
 
 impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
-    pub(crate) fn new(
+    pub(crate) fn new<S>(
         entities: &'world EntityAllocator,
-        storages: &'world mut BTreeMap<TypeId, Box<dyn ComponentStorage>>,
+        storages: impl FnOnce(StorageBounds) -> S,
         filters: Requests,
         after_tick: u64,
         tick: u64,
         mut on_write: impl FnMut(TypeId),
-    ) -> Result<Self, QueryError> {
+    ) -> Result<Self, QueryError>
+    where
+        S: Iterator<Item = (TypeId, Borrowed<'world, dyn ComponentStorage>)>,
+    {
         let requests = Q::requests();
         for (position, request) in requests.iter().enumerate() {
             let Some(request) = request else { continue };
@@ -154,19 +158,25 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             keys.max().map_or(Unbounded, Included),
         );
         let mut columns: Columns<'world> = [const { None }; 8];
-        for (&id, storage) in storages.range_mut(bounds) {
+        for (id, storage) in storages(bounds) {
             let Some(request) = requested().find(|request| request.id == id) else {
                 continue;
             };
             let Some(slot) = columns.iter_mut().find(|column| column.is_none()) else {
                 break;
             };
-            let (index, ticks, values) = storage.query_parts();
-            let (shared, exclusive) = if request.access == Access::Write {
+            let (index, ticks, shared, exclusive) = if request.access == Access::Write {
+                let Borrowed::Exclusive(storage) = storage else {
+                    return Err(QueryError {
+                        component: request.name,
+                    });
+                };
+                let (index, ticks, values) = storage.query_parts();
                 on_write(id);
-                (None, Some((values, tick)))
+                (index, ticks, None, Some((values, tick)))
             } else {
-                (Some(&*values), None)
+                let (index, ticks, values) = storage.into_shared().query_parts_ref();
+                (index, ticks, Some(values), None)
             };
             *slot = Some(Column {
                 id,

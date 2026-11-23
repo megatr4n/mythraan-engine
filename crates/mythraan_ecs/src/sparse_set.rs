@@ -195,6 +195,18 @@ impl<T> SparseSet<T> {
         &self.entities
     }
 
+    pub(crate) fn query_parts_ref(&self) -> (SparseIndex<'_>, &[ComponentTicks], &Vec<T>) {
+        let index = SparseIndex {
+            sparse: &self.sparse,
+            entities: &self.entities,
+        };
+        (
+            index,
+            self.ticks.as_deref().unwrap_or_default(),
+            &self.values,
+        )
+    }
+
     pub(crate) fn query_parts(&mut self) -> (SparseIndex<'_>, &[ComponentTicks], &mut Vec<T>) {
         let index = SparseIndex {
             sparse: &self.sparse,

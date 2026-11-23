@@ -158,12 +158,12 @@ fn ensure(
     }
 }
 
-enum Borrowed<'world, T: ?Sized> {
+pub(crate) enum Borrowed<'world, T: ?Sized> {
     Shared(&'world T),
     Exclusive(&'world mut T),
 }
 
-impl<T: ?Sized> Borrowed<'_, T> {
+impl<'world, T: ?Sized> Borrowed<'world, T> {
     fn get(&self) -> &T {
         match self {
             Self::Shared(value) => value,
@@ -175,6 +175,13 @@ impl<T: ?Sized> Borrowed<'_, T> {
         match self {
             Self::Shared(_) => None,
             Self::Exclusive(value) => Some(value),
+        }
+    }
+
+    pub(crate) fn into_shared(self) -> &'world T {
+        match self {
+            Self::Shared(value) => value,
+            Self::Exclusive(value) => value,
         }
     }
 }

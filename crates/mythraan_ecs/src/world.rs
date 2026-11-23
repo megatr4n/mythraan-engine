@@ -14,6 +14,7 @@ use crate::{
 
 mod scope;
 mod transforms;
+pub(crate) use scope::Borrowed;
 pub use scope::{ScopedComponents, ScopedResources, SystemScope};
 use transforms::TransformPropagation;
 
@@ -242,7 +243,11 @@ impl World {
         let transforms = &mut self.transforms;
         QueryMut::new(
             &self.entities,
-            &mut self.components,
+            |bounds| {
+                self.components
+                    .range_mut(bounds)
+                    .map(|(&id, storage)| (id, Borrowed::Exclusive(storage.as_mut())))
+            },
             F::requests(),
             after_tick,
             tick,
