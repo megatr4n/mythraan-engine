@@ -120,6 +120,20 @@ impl App {
         Ok(())
     }
 
+    /// Runs a fixed number of frames without sleeping or opening a window.
+    ///
+    /// Every frame receives the supplied delta. Zero frames leave the app unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Stops at the first error from [`Self::update`].
+    pub fn run_headless(&mut self, frames: usize, delta: Duration) -> Result<(), AppError> {
+        for _ in 0..frames {
+            self.update(delta)?;
+        }
+        Ok(())
+    }
+
     fn run_fixed_updates(&mut self, frame_delta: Duration) -> Result<(), AppError> {
         if self.fixed_credit < STEP_UNITS {
             return Ok(());
