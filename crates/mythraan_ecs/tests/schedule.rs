@@ -1,10 +1,12 @@
 //! Conflict-aware execution through the public schedule API.
 
+use std::any::TypeId;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use mythraan_ecs::CommandError;
 use mythraan_ecs::prelude::{Commands, Query, Res, ResMut, Schedule, SystemAccess, World};
+use mythraan_ecs::{CommandError, ScheduleError, ScopeError, StorageKind};
 
 #[test]
 fn conflicting_systems_see_writes_in_registration_order() {
@@ -222,4 +224,74 @@ fn repeated_runs_keep_callback_state_and_new_systems_rebuild_the_batches() {
     );
     assert_eq!(reader, 3);
     assert!(schedule.run(&mut world).unwrap().is_empty());
+}
+
+#[test]
+fn a_system_error_discards_pending_commands_without_rolling_back_direct_writes() {
+    let mut world = World::new();
+    let target = world.spawn().unwrap();
+    world.resources_mut().insert(0_u32);
+    let mut schedule = Schedule::new();
+    schedule.add_system(
+        SystemAccess::of::<(ResMut<'_, u32>, Commands<'_>)>(),
+        move |mut scope, commands| {
+            let mut count = scope.resources.get_mut::<u32>()?.unwrap();
+            *count += 1;
+            if *count == 1 {
+                commands.unwrap().insert(target, true);
+            }
+            Ok(())
+        },
+    );
+    let failing = schedule.add_system(SystemAccess::of::<Res<'_, u32>>(), |scope, _| {
+        if *scope.resources.get::<u32>()?.unwrap() == 1 {
+            scope.resources.get::<bool>()?;
+        }
+        Ok(())
+    });
+    schedule.add_system(SystemAccess::of::<Res<'_, u32>>(), |scope, _| {
+        if *scope.resources.get::<u32>()?.unwrap() == 1 {
+            scope.resources.get::<i32>()?;
+        }
+        Ok(())
+    });
+
+    assert_eq!(
+        schedule.run(&mut world).unwrap_err(),
+        ScheduleError::System {
+            system: failing,
+            source: ScopeError::UndeclaredAccess {
+                storage: StorageKind::Resource,
+                type_id: TypeId::of::<bool>(),
+                write: false,
+            },
+        },
+    );
+    assert_eq!(world.resources().get::<u32>(), Some(&1));
+    assert!(world.get::<bool>(target).is_none());
+    assert!(schedule.run(&mut world).unwrap().is_empty());
+    assert_eq!(world.resources().get::<u32>(), Some(&2));
+    assert!(world.get::<bool>(target).is_none());
+}
+
+#[test]
+fn a_panicking_system_cannot_replay_its_commands_on_retry() {
+    let mut world = World::new();
+    let target = world.spawn().unwrap();
+    let mut schedule = Schedule::new();
+    let mut first = true;
+    schedule.add_system(SystemAccess::of::<Commands<'_>>(), move |_, commands| {
+        let mut commands = commands.unwrap();
+        if std::mem::take(&mut first) {
+            commands.insert(target, true);
+            panic!("fail after queuing a command");
+        }
+        commands.insert(target, 7_u32);
+        Ok(())
+    });
+    assert!(catch_unwind(AssertUnwindSafe(|| schedule.run(&mut world))).is_err());
+    assert!(world.get::<bool>(target).is_none());
+    assert_eq!(schedule.run(&mut world).unwrap().len(), 1);
+    assert_eq!(world.get::<u32>(target), Some(&7));
+    assert!(world.get::<bool>(target).is_none());
 }
