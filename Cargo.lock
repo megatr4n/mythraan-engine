@@ -503,6 +503,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mythraan_ecs"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "mythraan_math"
 version = "0.1.0"
 dependencies = [
