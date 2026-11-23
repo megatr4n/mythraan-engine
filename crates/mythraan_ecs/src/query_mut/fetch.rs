@@ -2,6 +2,7 @@ use std::any::TypeId;
 
 use super::{Access, Columns, Request, Requests, requests};
 use crate::Entity;
+use crate::change_detection::ComponentTicks;
 use crate::sparse_set::SparseIndex;
 
 pub trait Fetch {
@@ -17,7 +18,28 @@ pub trait Field {
     type Item<'row>;
     fn request() -> Request;
     fn bind<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>>;
-    fn item<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>>;
+    fn item<'row>(
+        state: &'row mut Self::State<'_>,
+        entity: Entity,
+    ) -> Option<RowItem<'row, Self::Item<'row>>>;
+}
+
+pub struct RowItem<'row, T> {
+    value: T,
+    stamp: Option<(&'row ComponentTicks, u64)>,
+}
+
+impl<T> RowItem<'_, T> {
+    fn shared(value: T) -> Self {
+        Self { value, stamp: None }
+    }
+
+    fn into_item(self) -> T {
+        if let Some((ticks, tick)) = self.stamp {
+            ticks.mark_changed(tick);
+        }
+        self.value
+    }
 }
 
 fn shared<'world, T: 'static>(
@@ -42,8 +64,11 @@ impl<T: Send + Sync + 'static> Field for &T {
     fn bind<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>> {
         shared::<T>(columns)
     }
-    fn item<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>> {
-        state.1.get(state.0.position(entity)?)
+    fn item<'row>(
+        state: &'row mut Self::State<'_>,
+        entity: Entity,
+    ) -> Option<RowItem<'row, Self::Item<'row>>> {
+        state.1.get(state.0.position(entity)?).map(RowItem::shared)
     }
 }
 
@@ -56,13 +81,24 @@ impl<T: Send + Sync + 'static> Field for Option<&T> {
     fn bind<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>> {
         Some(shared::<T>(columns))
     }
-    fn item<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>> {
-        Some(state.and_then(|(index, values)| values.get(index.position(entity)?)))
+    fn item<'row>(
+        state: &'row mut Self::State<'_>,
+        entity: Entity,
+    ) -> Option<RowItem<'row, Self::Item<'row>>> {
+        let value = state.and_then(|(index, values)| values.get(index.position(entity)?));
+        Some(RowItem::shared(value))
     }
 }
 
+pub struct WriteState<'world, T> {
+    index: SparseIndex<'world>,
+    values: &'world mut [T],
+    ticks: &'world [ComponentTicks],
+    tick: u64,
+}
+
 impl<T: Send + Sync + 'static> Field for &mut T {
-    type State<'world> = (SparseIndex<'world>, &'world mut [T]);
+    type State<'world> = WriteState<'world, T>;
     type Item<'row> = &'row mut T;
     fn request() -> Request {
         Request::of::<T>(Access::Write)
@@ -72,11 +108,24 @@ impl<T: Send + Sync + 'static> Field for &mut T {
             .iter_mut()
             .flatten()
             .find(|column| column.id == TypeId::of::<T>())?;
-        let values = column.exclusive.take()?.downcast_mut::<Vec<T>>()?;
-        Some((column.index, values.as_mut_slice()))
+        let (values, tick) = column.exclusive.take()?;
+        let values = values.downcast_mut::<Vec<T>>()?;
+        Some(WriteState {
+            index: column.index,
+            values: values.as_mut_slice(),
+            ticks: column.ticks,
+            tick,
+        })
     }
-    fn item<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>> {
-        state.1.get_mut(state.0.position(entity)?)
+    fn item<'row>(
+        state: &'row mut Self::State<'_>,
+        entity: Entity,
+    ) -> Option<RowItem<'row, Self::Item<'row>>> {
+        let position = state.index.position(entity)?;
+        Some(RowItem {
+            value: state.values.get_mut(position)?,
+            stamp: state.ticks.get(position).map(|ticks| (ticks, state.tick)),
+        })
     }
 }
 
@@ -90,7 +139,7 @@ impl<T: Field> Fetch for T {
         T::bind(columns)
     }
     fn get<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>> {
-        T::item(state, entity)
+        Some(T::item(state, entity)?.into_item())
     }
 }
 
@@ -107,7 +156,8 @@ macro_rules! tuple {
             }
             fn get<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>> {
                 let ($($state,)+) = state;
-                Some(($($field::item($state, entity)?,)+))
+                $(let $state = $field::item($state, entity)?;)+
+                Some(($($state.into_item(),)+))
             }
         }
     };

@@ -101,3 +101,49 @@ fn insert_replace_and_mutable_access_mark_changed_components() {
     world.advance_change_tick().unwrap();
     assert!(changed(&mut world).is_empty());
 }
+
+#[test]
+fn changed_filter_can_read_the_stamp_of_a_writable_component() {
+    let mut world = World::new();
+    let marked = world.spawn().unwrap();
+    let untouched = world.spawn().unwrap();
+    world.insert(marked, 10_u32).unwrap();
+    world.insert(untouched, 20_u32).unwrap();
+    world.advance_change_tick().unwrap();
+    world.insert(marked, 11_u32).unwrap();
+
+    world
+        .query_filtered_mut::<&mut u32, Changed<u32>>()
+        .unwrap()
+        .for_each(|entity, value| {
+            assert_eq!(entity, marked);
+            *value += 1;
+        });
+    assert_eq!(world.get::<u32>(marked), Some(&12));
+    assert_eq!(world.get::<u32>(untouched), Some(&20));
+    assert_eq!(changed(&mut world), [marked]);
+}
+
+#[test]
+fn missing_tuple_component_does_not_mark_unvisited_rows() {
+    let mut world = World::new();
+    let matched = world.spawn().unwrap();
+    let incomplete = world.spawn().unwrap();
+    world.insert(matched, 10_u32).unwrap();
+    world.insert(incomplete, 20_u32).unwrap();
+    world.insert(matched, true).unwrap();
+    for _ in 0..2 {
+        let other = world.spawn().unwrap();
+        world.insert(other, true).unwrap();
+    }
+    world.advance_change_tick().unwrap();
+    world
+        .query_mut::<(&mut u32, &bool)>()
+        .unwrap()
+        .for_each(|entity, (value, flag)| {
+            assert_eq!(entity, matched);
+            assert!(*flag);
+            *value += 1;
+        });
+    assert_eq!(changed(&mut world), [matched]);
+}

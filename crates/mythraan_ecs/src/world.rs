@@ -160,11 +160,13 @@ impl World {
         &mut self,
         after_tick: u64,
     ) -> Result<QueryMut<'_, Q>, QueryError> {
+        let tick = self.change_tick();
         QueryMut::new(
             &self.entities,
             &mut self.components,
             F::requests(),
             after_tick,
+            tick,
         )
     }
 

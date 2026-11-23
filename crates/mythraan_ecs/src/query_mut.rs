@@ -43,7 +43,7 @@ pub struct Column<'world> {
     index: SparseIndex<'world>,
     ticks: &'world [ComponentTicks],
     shared: Option<&'world (dyn Any + Send + Sync)>,
-    exclusive: Option<&'world mut (dyn Any + Send + Sync)>,
+    exclusive: Option<(&'world mut (dyn Any + Send + Sync), u64)>,
 }
 
 type Columns<'world> = [Option<Column<'world>>; 8];
@@ -79,6 +79,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
         storages: &'world mut BTreeMap<TypeId, Box<dyn ComponentStorage>>,
         filters: Requests,
         after_tick: u64,
+        tick: u64,
     ) -> Result<Self, QueryError> {
         let requests = Q::requests();
         for (position, request) in requests.iter().enumerate() {
@@ -109,7 +110,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             };
             let (index, ticks, values) = storage.query_parts();
             let (shared, exclusive) = if request.access == Access::Write {
-                (None, Some(values))
+                (None, Some((values, tick)))
             } else {
                 (Some(&*values), None)
             };
