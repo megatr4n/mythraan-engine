@@ -3,7 +3,9 @@
 use std::any::{TypeId, type_name};
 
 use mythraan_reflect::RegisterTypeError;
-use mythraan_reflect::prelude::{FieldInfo, FieldRange, Reflect, TypeInfo, TypeRegistry};
+use mythraan_reflect::prelude::{
+    FieldInfo, FieldRange, Reflect, ReflectFields, TypeInfo, TypeRegistry,
+};
 
 #[derive(Default)]
 struct LightSettings {
@@ -32,6 +34,56 @@ impl Reflect for Marker {
 enum LightMode {
     On,
     Off,
+}
+
+#[derive(Reflect)]
+struct Derived<T: 'static> {
+    r#type: T,
+    #[reflect(hidden)]
+    enabled: bool,
+}
+
+#[test]
+fn derived_fields_expose_values_by_name() {
+    let mut component = Derived {
+        r#type: String::from("point"),
+        enabled: true,
+    };
+    assert_eq!(
+        component
+            .field("type")
+            .and_then(|value| value.downcast_ref::<String>())
+            .map(String::as_str),
+        Some("point")
+    );
+    let value = component
+        .field_mut("type")
+        .unwrap()
+        .downcast_mut::<String>()
+        .unwrap();
+    value.push_str(" light");
+    assert_eq!(component.r#type, "point light");
+    assert_eq!(
+        component
+            .field("enabled")
+            .and_then(|value| value.downcast_ref::<bool>()),
+        Some(&true)
+    );
+    assert!(component.field("absent").is_none());
+}
+
+#[derive(Reflect)]
+#[repr(C, packed(2))]
+struct Packed {
+    number: u32,
+}
+
+#[test]
+fn packed_types_keep_field_metadata_without_unaligned_borrows() {
+    let mut component = Packed { number: 5 };
+    assert_eq!(Packed::fields()[0].name(), "number");
+    assert!(component.field("number").is_none());
+    assert!(component.field_mut("number").is_none());
 }
 
 impl Reflect for LightMode {

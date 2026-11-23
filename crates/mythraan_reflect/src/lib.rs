@@ -14,6 +14,6 @@ mod type_registry;
 
 pub use error::RegisterTypeError;
 pub use mythraan_reflect_derive::Reflect;
-pub use reflect::Reflect;
+pub use reflect::{Reflect, ReflectFields};
 pub use type_info::{FieldInfo, FieldRange, TypeInfo};
 pub use type_registry::TypeRegistry;

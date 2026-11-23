@@ -6,7 +6,10 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
 use quote::quote;
-use syn::{Attribute, Data, DeriveInput, Error, Fields, Result, ext::IdentExt, parse_macro_input};
+use syn::{
+    Attribute, Data, DeriveInput, Error, Fields, Meta, Result, Token, ext::IdentExt,
+    parse_macro_input, punctuated::Punctuated,
+};
 
 mod field;
 
@@ -24,6 +27,7 @@ pub fn derive_reflect(input: TokenStream) -> TokenStream {
 fn expand(input: DeriveInput) -> Result<Tokens> {
     reject_misplaced_attributes(&input.attrs)?;
     let name = &input.ident;
+    let mut access = Tokens::new();
     let (fields, variants) = match input.data {
         Data::Struct(data) => {
             let Fields::Named(fields) = data.fields else {
@@ -32,6 +36,32 @@ fn expand(input: DeriveInput) -> Result<Tokens> {
                     "Reflect requires a struct with named fields",
                 ));
             };
+            if !is_packed(&input.attrs) && !fields.named.is_empty() {
+                let members: Vec<_> = fields
+                    .named
+                    .iter()
+                    .filter_map(|field| field.ident.as_ref())
+                    .collect();
+                let names: Vec<_> = members
+                    .iter()
+                    .map(|ident| ident.unraw().to_string())
+                    .collect();
+                access = quote! {
+                    fn field(&self, name: &str) -> ::core::option::Option<&dyn ::core::any::Any> {
+                        match name {
+                            #(#names => ::core::option::Option::Some(&self.#members),)*
+                            _ => ::core::option::Option::None,
+                        }
+                    }
+
+                    fn field_mut(&mut self, name: &str) -> ::core::option::Option<&mut dyn ::core::any::Any> {
+                        match name {
+                            #(#names => ::core::option::Option::Some(&mut self.#members),)*
+                            _ => ::core::option::Option::None,
+                        }
+                    }
+                };
+            }
             let fields = fields
                 .named
                 .iter()
@@ -77,7 +107,25 @@ fn expand(input: DeriveInput) -> Result<Tokens> {
                 &[#(#variants),*]
             }
         }
+
+        #[automatically_derived]
+        impl #impl_generics ::mythraan_reflect::ReflectFields for #name #type_generics #where_clause {
+            #access
+        }
     })
+}
+
+fn is_packed(attributes: &[Attribute]) -> bool {
+    attributes
+        .iter()
+        .filter(|attribute| attribute.path().is_ident("repr"))
+        .filter_map(|attribute| {
+            attribute
+                .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+                .ok()
+        })
+        .flatten()
+        .any(|layout| layout.path().is_ident("packed"))
 }
 
 fn reject_misplaced_attributes(attributes: &[Attribute]) -> Result<()> {
