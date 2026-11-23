@@ -16,6 +16,7 @@ mod query;
 mod query_mut;
 mod resources;
 mod sparse_set;
+mod system_access;
 mod world;
 
 pub use command_buffer::{
@@ -32,4 +33,5 @@ pub use query::{Query, ReadQuery};
 pub use query_mut::{Added, Changed, QueryFilter, QueryMut, With, Without, WriteQuery};
 pub use resources::Resources;
 pub use sparse_set::SparseSet;
+pub use system_access::{AccessSet, SystemAccess, SystemParam};
 pub use world::World;

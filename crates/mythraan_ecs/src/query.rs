@@ -1,17 +1,18 @@
 use std::iter::FusedIterator;
 use std::ops::Range;
 
-use crate::{Entity, World};
+use crate::{Entity, SystemAccess, World};
 
 mod tuples;
 
 mod sealed {
-    use crate::{Entity, World};
+    use crate::{Entity, SystemAccess, World};
 
     pub trait Fetch {
         type Item<'world>;
         type State<'world>;
 
+        fn record_reads(access: &mut SystemAccess);
         fn prepare(world: &World) -> Option<Self::State<'_>>;
         fn len(state: &Self::State<'_>) -> usize;
         fn row<'world>(
@@ -95,6 +96,10 @@ impl<Q: ReadQuery> FusedIterator for Query<'_, Q> {}
 impl<T: Send + Sync + 'static> sealed::Fetch for &T {
     type Item<'world> = &'world T;
     type State<'world> = (&'world [Entity], &'world [T]);
+
+    fn record_reads(access: &mut SystemAccess) {
+        access.read_component(std::any::TypeId::of::<T>());
+    }
 
     fn prepare(world: &World) -> Option<Self::State<'_>> {
         let storage = world.storage::<T>()?;

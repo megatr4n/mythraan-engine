@@ -1,11 +1,17 @@
+use std::any::TypeId;
+
 use super::sealed::Fetch;
-use crate::{Entity, SparseSet, World};
+use crate::{Entity, SparseSet, SystemAccess, World};
 
 macro_rules! read_tuple {
     ($($component:ident => $storage:ident),+ $(,)?) => {
         impl<$($component: Send + Sync + 'static),+> Fetch for ($(&$component,)+) {
             type Item<'world> = ($(&'world $component,)+);
             type State<'world> = (($(&'world SparseSet<$component>,)+), &'world [Entity]);
+
+            fn record_reads(access: &mut SystemAccess) {
+                $(access.read_component(TypeId::of::<$component>());)+
+            }
 
             fn prepare(world: &World) -> Option<Self::State<'_>> {
                 $(let $storage = world.storage::<$component>()?;)+
