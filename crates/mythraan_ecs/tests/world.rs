@@ -1,5 +1,11 @@
 //! World behavior through the public ECS API.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use mythraan_ecs::WorldInsertError;
 use mythraan_ecs::prelude::World;
 
@@ -130,4 +136,57 @@ fn stale_id_cannot_read_or_modify_its_replacement() {
     assert!(!world.despawn(old));
     assert!(world.is_alive(live));
     assert_eq!(world.get::<u32>(live), Some(&44));
+}
+
+#[test]
+fn despawn_drops_owned_components_of_each_type_once() {
+    struct CountDrops<const KIND: u8>(Arc<AtomicUsize>);
+
+    impl<const KIND: u8> Drop for CountDrops<KIND> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world
+        .insert(entity, CountDrops::<0>(Arc::clone(&drops)))
+        .unwrap();
+    world
+        .insert(entity, CountDrops::<1>(Arc::clone(&drops)))
+        .unwrap();
+
+    assert!(world.despawn(entity));
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+    assert!(!world.despawn(entity));
+    drop(world);
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn despawn_can_retry_after_a_component_destructor_unwinds() {
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("test component destructor");
+        }
+    }
+
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, PanicOnDrop).unwrap();
+    world.insert(entity, 42_u32).unwrap();
+    let first = catch_unwind(AssertUnwindSafe(|| world.despawn(entity)));
+    assert!(first.is_err());
+    assert!(world.is_alive(entity));
+    assert!(world.get::<PanicOnDrop>(entity).is_none());
+
+    assert!(world.despawn(entity));
+    let replacement = world.spawn().unwrap();
+    assert_eq!(replacement.index(), entity.index());
+    assert_ne!(replacement.generation(), entity.generation());
+    assert_eq!(world.insert(replacement, 1_u32).unwrap(), None);
 }

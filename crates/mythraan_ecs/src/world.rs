@@ -7,6 +7,23 @@ use crate::{Entity, EntityAllocError, EntityAllocator, SparseSet, WorldInsertErr
 /// Owns the entities and their components in a simulation.
 ///
 /// Use entity identifiers with the world that issued them.
+///
+/// ```
+/// use mythraan_ecs::prelude::World;
+///
+/// struct Health(u32);
+///
+/// let mut world = World::new();
+/// let entity = world.spawn()?;
+/// world.insert(entity, Health(100))?;
+/// if let Some(health) = world.get_mut::<Health>(entity) {
+///     health.0 -= 10;
+/// }
+/// assert_eq!(world.get::<Health>(entity).map(|health| health.0), Some(90));
+/// assert!(world.despawn(entity));
+/// assert!(world.get::<Health>(entity).is_none());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Default)]
 pub struct World {
     entities: EntityAllocator,
@@ -33,6 +50,8 @@ impl World {
     ///
     /// Returns false if the entity identifier is not live. Cleanup visits each
     /// registered component storage before the entity slot can be reused.
+    /// If a component's destructor unwinds, the entity remains live and calling
+    /// this method again cleans up any remaining components.
     pub fn despawn(&mut self, entity: Entity) -> bool {
         if !self.is_alive(entity) {
             return false;
