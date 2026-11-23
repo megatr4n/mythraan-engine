@@ -30,6 +30,16 @@ fn quadruple_query_returns_components_in_the_requested_order() {
 }
 
 #[test]
+fn one_element_tuple_yields_a_single_reference_in_a_tuple() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, Health(15)).unwrap();
+
+    let values: Vec<_> = world.query::<(&Health,)>().collect();
+    assert_eq!(values, [(entity, (&Health(15),))]);
+}
+
+#[test]
 fn single_query_reads_components_from_matching_entities() {
     let mut world = World::new();
     let first = world.spawn().unwrap();

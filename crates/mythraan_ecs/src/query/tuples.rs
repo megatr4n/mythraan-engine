@@ -31,6 +31,7 @@ macro_rules! read_tuple {
     };
 }
 
+read_tuple!(A => a);
 read_tuple!(A => a, B => b);
 read_tuple!(A => a, B => b, C => c);
 read_tuple!(A => a, B => b, C => c, D => d);
