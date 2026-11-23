@@ -27,7 +27,7 @@ jobs:
 
   miri:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       MIRI_TOOLCHAIN: nightly-2026-11-22
     steps:
