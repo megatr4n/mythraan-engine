@@ -16,6 +16,9 @@ pub enum ScheduleConfigError {
     /// The referenced registration index does not exist in the schedule.
     #[error("unknown system {0}")]
     UnknownSystem(usize),
+    /// The referenced system set is missing from the order.
+    #[error("unknown system set {0:?}")]
+    UnknownSet(&'static str),
     /// The explicit ordering has a cycle.
     #[error("system ordering contains a cycle")]
     Cycle,

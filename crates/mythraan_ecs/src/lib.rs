@@ -39,7 +39,7 @@ pub use query_mut::{
     Added, Changed, FilteredQuery, QueryFilter, QueryMut, With, Without, WriteQuery,
 };
 pub use resources::{Res, ResMut, Resources};
-pub use schedule::{Schedule, SystemFlush, SystemOrder};
+pub use schedule::{OrderTarget, Schedule, SystemFlush, SystemOrder};
 pub use sparse_set::SparseSet;
 pub use stages::Stages;
 pub use system_access::{AccessSet, SystemAccess, SystemParam};

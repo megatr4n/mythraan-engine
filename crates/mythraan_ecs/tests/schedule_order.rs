@@ -1,5 +1,8 @@
 //! Ordering and conditional execution for schedules.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use mythraan_ecs::ScheduleConfigError;
 use mythraan_ecs::prelude::{
     Commands, Query, ResMut, Schedule, Stages, SystemAccess, SystemOrder, World,
@@ -75,4 +78,57 @@ fn explicit_order_overrides_conflict_defaults_and_invalid_order_is_atomic() {
     );
     assert!(schedule.run(&mut world).unwrap().is_empty());
     assert_eq!(world.resources().get::<Vec<u8>>().unwrap(), &[2, 1]);
+}
+
+#[test]
+fn named_sets_order_independent_systems_and_accept_overlapping_memberships() {
+    let mut schedule = Schedule::new();
+    let completed = Arc::new(AtomicUsize::new(0));
+    let progress = Arc::clone(&completed);
+    let reader = schedule.add_system(SystemAccess::of::<()>(), move |_, _| {
+        assert_eq!(progress.load(Ordering::SeqCst), 3);
+        Ok(())
+    });
+    let first = Arc::clone(&completed);
+    let write_first = schedule.add_system(SystemAccess::of::<()>(), move |_, _| {
+        first.fetch_or(1, Ordering::SeqCst);
+        Ok(())
+    });
+    let second = Arc::clone(&completed);
+    let write_second = schedule.add_system(SystemAccess::of::<()>(), move |_, _| {
+        second.fetch_or(2, Ordering::SeqCst);
+        Ok(())
+    });
+
+    let mut order = SystemOrder::new();
+    order
+        .set("writers", [write_first, write_second])
+        .set("first", [write_first])
+        .set("readers", [reader])
+        .before("writers", "readers")
+        .after(reader, "first");
+    schedule.configure_order(&order).unwrap();
+    assert!(schedule.run(&mut World::new()).unwrap().is_empty());
+}
+
+#[test]
+fn invalid_set_references_and_self_dependencies_are_rejected() {
+    let mut schedule = Schedule::new();
+    let system = schedule.add_system(SystemAccess::of::<()>(), |_, _| Ok(()));
+    assert_eq!(
+        schedule.configure_order(SystemOrder::new().before("missing", system)),
+        Err(ScheduleConfigError::UnknownSet("missing"))
+    );
+    assert_eq!(
+        schedule.configure_order(SystemOrder::new().set("invalid", [usize::MAX])),
+        Err(ScheduleConfigError::UnknownSystem(usize::MAX))
+    );
+    assert_eq!(
+        schedule.configure_order(
+            SystemOrder::new()
+                .set("including", [system])
+                .before("including", system)
+        ),
+        Err(ScheduleConfigError::Cycle)
+    );
 }

@@ -1,11 +1,33 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ScheduleConfigError;
 
 /// Explicit ordering constraints applied with [`crate::Schedule::configure_order`].
 #[derive(Default)]
 pub struct SystemOrder {
-    edges: Vec<(usize, usize)>,
+    sets: BTreeMap<&'static str, Vec<usize>>,
+    edges: Vec<(OrderTarget, OrderTarget)>,
+}
+
+/// A registered system or a named set of systems in a [`SystemOrder`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderTarget {
+    /// A registration index returned when adding a system.
+    System(usize),
+    /// A name declared with [`SystemOrder::set`].
+    Set(&'static str),
+}
+
+impl From<usize> for OrderTarget {
+    fn from(system: usize) -> Self {
+        Self::System(system)
+    }
+}
+
+impl From<&'static str> for OrderTarget {
+    fn from(name: &'static str) -> Self {
+        Self::Set(name)
+    }
 }
 
 impl SystemOrder {
@@ -15,25 +37,47 @@ impl SystemOrder {
         Self::default()
     }
 
-    /// Requires the first system to finish before the second starts.
-    pub fn before(&mut self, first: usize, second: usize) -> &mut Self {
-        self.edges.push((first, second));
+    /// Defines or replaces a set of registration indices. A system may join several sets.
+    pub fn set(
+        &mut self,
+        name: &'static str,
+        systems: impl IntoIterator<Item = usize>,
+    ) -> &mut Self {
+        self.sets.insert(name, systems.into_iter().collect());
         self
     }
 
-    /// Requires the first system to start after the second finishes.
-    pub fn after(&mut self, first: usize, second: usize) -> &mut Self {
+    /// Requires every system in the first target to finish before any in the second starts.
+    pub fn before(
+        &mut self,
+        first: impl Into<OrderTarget>,
+        second: impl Into<OrderTarget>,
+    ) -> &mut Self {
+        self.edges.push((first.into(), second.into()));
+        self
+    }
+
+    /// Requires every system in the first target to start after all in the second finish.
+    pub fn after(
+        &mut self,
+        first: impl Into<OrderTarget>,
+        second: impl Into<OrderTarget>,
+    ) -> &mut Self {
         self.before(second, first)
     }
 
     pub(super) fn compile(&self, count: usize) -> Result<OrderPlan, ScheduleConfigError> {
         let mut predecessors = vec![Vec::new(); count];
-        for &(first, second) in &self.edges {
-            validate_system(first, count)?;
-            let list = predecessors
-                .get_mut(second)
-                .ok_or(ScheduleConfigError::UnknownSystem(second))?;
-            list.push(first);
+        for &member in self.sets.values().flatten() {
+            validate_system(member, count)?;
+        }
+        for (first, second) in &self.edges {
+            let first = self.members(first, count)?;
+            for &system in self.members(second, count)? {
+                if let Some(list) = predecessors.get_mut(system) {
+                    list.extend_from_slice(first);
+                }
+            }
         }
         for list in &mut predecessors {
             list.sort_unstable();
@@ -44,6 +88,24 @@ impl SystemOrder {
             indices,
             predecessors,
         })
+    }
+
+    fn members<'a>(
+        &'a self,
+        target: &'a OrderTarget,
+        count: usize,
+    ) -> Result<&'a [usize], ScheduleConfigError> {
+        match target {
+            OrderTarget::System(index) => {
+                validate_system(*index, count)?;
+                Ok(std::slice::from_ref(index))
+            }
+            OrderTarget::Set(name) => self
+                .sets
+                .get(name)
+                .map(Vec::as_slice)
+                .ok_or(ScheduleConfigError::UnknownSet(name)),
+        }
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
 
 mod order;
 use order::OrderPlan;
-pub use order::SystemOrder;
+pub use order::{OrderTarget, SystemOrder};
 
 type Callback = dyn for<'world, 'queue> FnMut(
         SystemScope<'world>,
@@ -126,7 +126,7 @@ impl Schedule {
     ///
     /// # Errors
     ///
-    /// Unknown systems or a cycle leave the previous ordering in effect.
+    /// Unknown systems, unknown sets or a cycle leave the previous ordering in effect.
     pub fn configure_order(&mut self, order: &SystemOrder) -> Result<(), ScheduleConfigError> {
         self.order = Some(order.compile(self.systems.len())?);
         self.batches_dirty = true;
