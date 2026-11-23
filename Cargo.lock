@@ -511,6 +511,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mythraan_app"
+version = "0.1.0"
+
+[[package]]
 name = "mythraan_core"
 version = "0.1.0"
 dependencies = [
