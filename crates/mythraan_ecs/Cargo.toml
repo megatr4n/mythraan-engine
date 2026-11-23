@@ -9,6 +9,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+mythraan_math.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

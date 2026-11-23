@@ -39,6 +39,14 @@ impl Hierarchy {
         self.children.get(parent)
     }
 
+    pub(crate) fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.children
+            .entities()
+            .iter()
+            .copied()
+            .filter(|&entity| self.parent(entity).is_none())
+    }
+
     pub(crate) fn set_parent(
         &mut self,
         child: Entity,

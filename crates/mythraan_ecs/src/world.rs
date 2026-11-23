@@ -2,6 +2,8 @@ use std::any::{Any, TypeId, type_name};
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::num::NonZeroU64;
 
+use mythraan_math::transform::{GlobalTransform, Transform};
+
 use crate::component_storage::ComponentStorage;
 use crate::hierarchy::Hierarchy;
 use crate::{
@@ -9,6 +11,8 @@ use crate::{
     Query, QueryError, QueryFilter, QueryMut, ReadQuery, Resources, SparseSet, WorldInsertError,
     WriteQuery,
 };
+
+mod transforms;
 
 /// Owns the entities, components, and shared resources in a simulation.
 ///
@@ -302,8 +306,15 @@ impl World {
     /// Removes and returns an entity's component of the requested type.
     ///
     /// Returns `None` if the entity is not live or lacks the component.
+    /// Removing a `Transform` also clears its derived `GlobalTransform`.
     pub fn remove<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<T> {
-        self.storage_mut::<T>(entity)?.remove(entity)
+        let removed = self.storage_mut::<T>(entity)?.remove(entity)?;
+        if TypeId::of::<T>() == TypeId::of::<Transform>()
+            && let Some(storage) = self.storage_mut::<GlobalTransform>(entity)
+        {
+            storage.remove(entity);
+        }
+        Some(removed)
     }
 
     fn storage_mut<T: Send + Sync + 'static>(
