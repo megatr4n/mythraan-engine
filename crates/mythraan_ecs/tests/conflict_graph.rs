@@ -1,7 +1,10 @@
 //! Conflict graph behavior through the public ECS API.
 
 use mythraan_ecs::AccessSet;
-use mythraan_ecs::prelude::{ConflictGraph, Query, QueryMut, Res, ResMut, SystemAccess};
+use mythraan_ecs::prelude::{
+    Changed, Commands, ConflictGraph, FilteredQuery, Query, QueryMut, Res, ResMut, SystemAccess,
+    With,
+};
 
 #[test]
 fn orders_writes_and_read_groups_for_a_component() {
@@ -125,4 +128,25 @@ fn sparse_dependencies_match_pairwise_conflicts_and_batch_levels() {
         }
         assert_eq!(actual_levels, expected_levels);
     }
+}
+
+#[test]
+fn filtered_reads_order_writes_while_deferred_commands_share_the_batch() {
+    type Filtered<'world> = FilteredQuery<'world, &'world i8, (With<u16>, Changed<u32>)>;
+    let systems = [
+        SystemAccess::of::<QueryMut<'_, &mut u32>>(),
+        SystemAccess::of::<ResMut<'_, u32>>(),
+        SystemAccess::of::<Commands<'_>>(),
+        SystemAccess::of::<Filtered<'_>>(),
+        SystemAccess::of::<QueryMut<'_, &mut u16>>(),
+        SystemAccess::of::<Commands<'_>>(),
+    ];
+    let graph = ConflictGraph::new(&systems);
+    assert_eq!(graph.predecessors(3), Some([0].as_slice()));
+    assert_eq!(graph.predecessors(4), Some([3].as_slice()));
+    assert_eq!(
+        graph.batches().collect::<Vec<_>>(),
+        [&[0, 1, 2, 5][..], &[3], &[4]]
+    );
+    assert_eq!(graph, ConflictGraph::new(&systems));
 }
