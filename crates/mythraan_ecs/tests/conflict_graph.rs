@@ -1,5 +1,6 @@
 //! Conflict graph behavior through the public ECS API.
 
+use mythraan_ecs::AccessSet;
 use mythraan_ecs::prelude::{ConflictGraph, Query, QueryMut, Res, ResMut, SystemAccess};
 
 #[test]
@@ -55,4 +56,73 @@ fn empty_graphs_and_shared_readers_need_no_separation() {
     let read = SystemAccess::of::<Res<'_, u32>>();
     let graph = ConflictGraph::new(&[read.clone(), read.clone(), read]);
     assert_eq!(graph.batches().collect::<Vec<_>>(), [&[0, 1, 2][..]]);
+}
+
+fn overlaps(first: &AccessSet, second: &AccessSet) -> bool {
+    !first.writes().is_disjoint(second.writes())
+        || !first.writes().is_disjoint(second.reads())
+        || !first.reads().is_disjoint(second.writes())
+}
+
+fn conflicts(first: &SystemAccess, second: &SystemAccess) -> bool {
+    overlaps(first.components(), second.components())
+        || overlaps(first.resources(), second.resources())
+}
+
+#[test]
+fn sparse_dependencies_match_pairwise_conflicts_and_batch_levels() {
+    const SYSTEMS: usize = 4;
+    let options = [
+        SystemAccess::of::<()>(),
+        SystemAccess::of::<Query<'_, &u32>>(),
+        SystemAccess::of::<QueryMut<'_, &mut u32>>(),
+        SystemAccess::of::<Res<'_, u32>>(),
+        SystemAccess::of::<ResMut<'_, u32>>(),
+        SystemAccess::of::<(Query<'_, &u32>, ResMut<'_, u32>)>(),
+        SystemAccess::of::<(QueryMut<'_, &mut u32>, Res<'_, u32>)>(),
+        SystemAccess::of::<QueryMut<'_, (&mut bool, &u32)>>(),
+    ];
+
+    for mut combination in 0..options.len().pow(SYSTEMS as u32) {
+        let systems: [SystemAccess; SYSTEMS] = std::array::from_fn(|_| {
+            let id = combination % options.len();
+            combination /= options.len();
+            options[id].clone()
+        });
+        let graph = ConflictGraph::new(&systems);
+        let mut ordered = [[false; SYSTEMS]; SYSTEMS];
+        let mut expected_levels = [0; SYSTEMS];
+        for (system, access) in systems.iter().enumerate() {
+            let mut ancestors = [false; SYSTEMS];
+            let dependencies = graph.predecessors(system).unwrap();
+            assert!(dependencies.windows(2).all(|pair| pair[0] < pair[1]));
+            for &dependency in dependencies {
+                assert!(dependency < system);
+                assert!(conflicts(&systems[dependency], access));
+                ancestors[dependency] = true;
+                for (target, inherited) in ancestors.iter_mut().zip(ordered[dependency]) {
+                    *target |= inherited;
+                }
+            }
+
+            ordered[system] = ancestors;
+            for (earlier, earlier_access) in systems.iter().take(system).enumerate() {
+                if conflicts(earlier_access, access) {
+                    assert!(ancestors[earlier]);
+                    expected_levels[system] =
+                        expected_levels[system].max(expected_levels[earlier] + 1);
+                }
+            }
+        }
+
+        let mut actual_levels = [usize::MAX; SYSTEMS];
+        for (level, batch) in graph.batches().enumerate() {
+            assert!(batch.windows(2).all(|pair| pair[0] < pair[1]));
+            for &system in batch {
+                assert_eq!(actual_levels[system], usize::MAX);
+                actual_levels[system] = level;
+            }
+        }
+        assert_eq!(actual_levels, expected_levels);
+    }
 }
