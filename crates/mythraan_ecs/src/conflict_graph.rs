@@ -10,6 +10,7 @@ use crate::{AccessSet, SystemAccess};
 #[derive(Debug, PartialEq, Eq)]
 pub struct ConflictGraph {
     predecessors: Vec<Vec<usize>>,
+    batches: Vec<Vec<usize>>,
 }
 
 impl ConflictGraph {
@@ -38,7 +39,11 @@ impl ConflictGraph {
             dependencies.dedup();
             predecessors.push(dependencies);
         }
-        Self { predecessors }
+        let batches = build_batches(&predecessors);
+        Self {
+            predecessors,
+            batches,
+        }
     }
 
     /// Returns direct predecessors in registration order, or `None` for an unknown index.
@@ -46,6 +51,32 @@ impl ConflictGraph {
     pub fn predecessors(&self, system: usize) -> Option<&[usize]> {
         self.predecessors.get(system).map(Vec::as_slice)
     }
+
+    /// Returns compatible batches in dependency order.
+    ///
+    /// Within each batch, systems appear in registration order.
+    pub fn batches(&self) -> impl ExactSizeIterator<Item = &[usize]> {
+        self.batches.iter().map(Vec::as_slice)
+    }
+}
+
+fn build_batches(predecessors: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let mut levels = Vec::with_capacity(predecessors.len());
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    for (system, dependencies) in predecessors.iter().enumerate() {
+        let level = dependencies
+            .iter()
+            .filter_map(|&dependency| levels.get(dependency).copied())
+            .max()
+            .map_or(0, |previous| previous + 1);
+        levels.push(level);
+        if let Some(batch) = batches.get_mut(level) {
+            batch.push(system);
+        } else {
+            batches.push(vec![system]);
+        }
+    }
+    batches
 }
 
 #[derive(Default)]
