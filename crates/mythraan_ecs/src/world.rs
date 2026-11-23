@@ -67,4 +67,16 @@ impl World {
             }
         }
     }
+
+    /// Borrows an entity's component of the requested type.
+    ///
+    /// Returns `None` if the entity is not live or lacks the component.
+    #[must_use]
+    pub fn get<T: Send + Sync + 'static>(&self, entity: Entity) -> Option<&T> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+        let erased: &dyn Any = self.components.get(&TypeId::of::<T>())?.as_ref();
+        erased.downcast_ref::<SparseSet<T>>()?.get(entity)
+    }
 }
