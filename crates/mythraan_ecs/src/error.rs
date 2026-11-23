@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::collections::TryReserveError;
 
 use thiserror::Error;
@@ -8,6 +9,38 @@ use crate::Entity;
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("world change tick exhausted")]
 pub struct ChangeTickError;
+
+/// The kind of storage involved in a scoped access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageKind {
+    /// A collection of components.
+    Component,
+    /// A singleton resource.
+    Resource,
+}
+
+/// A batch or system requested incompatible storage access.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ScopeError {
+    /// Multiple systems requested access to a type with an exclusive borrower.
+    #[error("conflicting batch access to {storage:?} {type_id:?}")]
+    BatchConflict {
+        /// The kind of storage requested.
+        storage: StorageKind,
+        /// The requested Rust type.
+        type_id: TypeId,
+    },
+    /// The system did not declare the requested type or access mode.
+    #[error("undeclared access to {storage:?} {type_id:?} (write: {write})")]
+    UndeclaredAccess {
+        /// The kind of storage requested.
+        storage: StorageKind,
+        /// The requested Rust type.
+        type_id: TypeId,
+        /// Whether the request needs exclusive access.
+        write: bool,
+    },
+}
 
 /// A parent relationship could not be changed.
 #[derive(Debug, Error)]

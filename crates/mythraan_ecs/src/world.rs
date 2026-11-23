@@ -12,7 +12,9 @@ use crate::{
     WriteQuery,
 };
 
+mod scope;
 mod transforms;
+pub use scope::{ScopedComponents, ScopedResources, SystemScope};
 use transforms::TransformPropagation;
 
 /// Owns the entities, components, and shared resources in a simulation.

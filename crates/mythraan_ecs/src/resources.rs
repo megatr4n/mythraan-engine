@@ -10,7 +10,7 @@ pub struct Resources {
 }
 
 /// A system's shared borrow of the resource of type `T`.
-pub struct Res<'world, T>(&'world T);
+pub struct Res<'world, T>(pub(crate) &'world T);
 
 impl<'world, T: Send + Sync + 'static> Res<'world, T> {
     /// Borrows the resource if it is present.
@@ -29,7 +29,7 @@ impl<T> Deref for Res<'_, T> {
 }
 
 /// A system's exclusive borrow of the resource of type `T`.
-pub struct ResMut<'world, T>(&'world mut T);
+pub struct ResMut<'world, T>(pub(crate) &'world mut T);
 
 impl<'world, T: Send + Sync + 'static> ResMut<'world, T> {
     /// Mutably borrows the resource if it is present.
@@ -60,6 +60,14 @@ impl Resources {
         Self {
             values: BTreeMap::new(),
         }
+    }
+
+    pub(crate) fn entries_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (TypeId, &mut (dyn Any + Send + Sync))> {
+        self.values
+            .iter_mut()
+            .map(|(&id, value)| (id, value.as_mut()))
     }
 
     /// Stores a resource and returns the previous value of the same type, if any.
