@@ -4,6 +4,14 @@ use thiserror::Error;
 
 use crate::Entity;
 
+/// An event could not be queued.
+#[derive(Debug, Error)]
+pub enum EventWriteError {
+    /// Memory could not be reserved for the event.
+    #[error("could not reserve memory for an event")]
+    Reserve(#[from] TryReserveError),
+}
+
 /// A queued structural change failed during a flush.
 #[derive(Debug, Error)]
 pub enum CommandError {
