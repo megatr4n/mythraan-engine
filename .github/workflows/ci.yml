@@ -24,3 +24,21 @@ jobs:
         run: |
           cargo install cargo-deny --version 0.22.0 --locked
           cargo deny check
+
+  miri:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MIRI_TOOLCHAIN: nightly-2026-11-22
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Miri
+        run: |
+          rustup toolchain install "$MIRI_TOOLCHAIN" --profile minimal --component miri --component rust-src --no-self-update
+          cargo +"$MIRI_TOOLCHAIN" miri setup
+      - name: Test ECS with Miri
+        run: cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features
+      - name: Stress ECS across additional thread schedules
+        env:
+          MIRIFLAGS: -Zmiri-many-seeds=1..4
+        run: cargo +"$MIRI_TOOLCHAIN" miri test --locked -p mythraan_ecs --all-features --test scheduler_stress --test command_buffer_stress
