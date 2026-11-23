@@ -25,3 +25,19 @@ fn reading_a_missing_resource_returns_none() {
     resources.insert(40_u32);
     assert!(resources.get::<String>().is_none());
 }
+
+#[test]
+fn mutably_borrows_only_the_requested_resource() {
+    let mut resources = Resources::new();
+    assert!(resources.get_mut::<String>().is_none());
+    resources.insert(String::from("value"));
+    resources.insert(40_u32);
+
+    resources.get_mut::<String>().unwrap().push('!');
+    assert_eq!(
+        resources.get::<String>().map(String::as_str),
+        Some("value!")
+    );
+    assert_eq!(resources.get::<u32>(), Some(&40));
+    assert!(resources.get_mut::<bool>().is_none());
+}

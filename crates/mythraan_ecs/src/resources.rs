@@ -36,4 +36,10 @@ impl Resources {
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.values.get(&TypeId::of::<T>())?.downcast_ref()
     }
+
+    /// Mutably borrows the resource of the requested type if it is present.
+    #[must_use]
+    pub fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
+        self.values.get_mut(&TypeId::of::<T>())?.downcast_mut()
+    }
 }
