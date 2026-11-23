@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use crate::component_storage::ComponentStorage;
 use crate::{Entity, EntityAllocError, EntityAllocator, SparseSet, WorldInsertError};
 
-/// Owns the entities in a simulation.
+/// Owns the entities and their components in a simulation.
 ///
 /// Use entity identifiers with the world that issued them.
 #[derive(Default)]
@@ -27,6 +27,20 @@ impl World {
     /// Returns an error if the allocator cannot issue another identifier.
     pub fn spawn(&mut self) -> Result<Entity, EntityAllocError> {
         self.entities.spawn()
+    }
+
+    /// Removes an entity and all of its components.
+    ///
+    /// Returns false if the entity identifier is not live. Cleanup visits each
+    /// registered component storage before the entity slot can be reused.
+    pub fn despawn(&mut self, entity: Entity) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+        for storage in self.components.values_mut() {
+            storage.remove_entity(entity);
+        }
+        self.entities.despawn(entity)
     }
 
     /// Returns whether this entity identifier is live in the world.
