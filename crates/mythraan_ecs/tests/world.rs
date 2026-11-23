@@ -12,3 +12,18 @@ fn spawns_distinct_live_entities() {
     assert!(world.is_alive(first));
     assert!(world.is_alive(second));
 }
+
+#[test]
+fn insert_returns_previous_component_of_the_same_type() {
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    assert_eq!(world.insert(entity, String::from("first")).unwrap(), None);
+    assert_eq!(world.insert(entity, 5_u32).unwrap(), None);
+    assert_eq!(
+        world
+            .insert(entity, String::from("second"))
+            .unwrap()
+            .as_deref(),
+        Some("first")
+    );
+}

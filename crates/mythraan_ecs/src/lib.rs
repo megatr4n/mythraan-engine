@@ -5,12 +5,13 @@
 
 pub mod prelude;
 
+mod component_storage;
 mod entity;
 mod error;
 mod sparse_set;
 mod world;
 
 pub use entity::{Entity, EntityAllocator};
-pub use error::{EntityAllocError, SparseSetError};
+pub use error::{EntityAllocError, SparseSetError, WorldInsertError};
 pub use sparse_set::SparseSet;
 pub use world::World;
