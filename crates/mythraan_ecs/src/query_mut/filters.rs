@@ -16,6 +16,25 @@ pub struct Added<T>(PhantomData<fn() -> T>);
 ///
 /// A mutable borrow counts as a change. Interior writes through shared
 /// references are outside this tracking.
+///
+/// ```
+/// use mythraan_ecs::prelude::{Changed, World};
+///
+/// let mut world = World::new();
+/// let entity = world.spawn()?;
+/// world.insert(entity, 80_u32)?;
+/// let checkpoint = world.change_tick();
+/// world.advance_change_tick()?;
+/// world.insert(entity, 90_u32)?;
+/// world.advance_change_tick()?;
+///
+/// let mut changed_value = None;
+/// world
+///     .query_filtered_mut_since::<&u32, Changed<u32>>(checkpoint)?
+///     .for_each(|_, value| changed_value = Some(*value));
+/// assert_eq!(changed_value, Some(90));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub struct Changed<T>(PhantomData<fn() -> T>);
 
 pub trait Condition {

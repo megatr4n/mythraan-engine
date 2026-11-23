@@ -150,6 +150,8 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
     }
 
     /// Calls `visit` with the requested components of every matching entity.
+    ///
+    /// Each yielded mutable reference marks its component as changed.
     pub fn for_each(mut self, mut visit: impl for<'row> FnMut(Entity, Q::Item<'row>)) {
         let Some(state) = self.state.as_mut() else {
             return;

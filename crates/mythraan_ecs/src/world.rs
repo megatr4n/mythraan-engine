@@ -61,7 +61,7 @@ impl World {
 
     /// Starts the next change tick and returns its value.
     ///
-    /// Choose when to advance the tick for your simulation.
+    /// Advance between groups of writes that readers need to distinguish.
     ///
     /// # Errors
     /// Returns an error if advancing would overflow the tick counter.
