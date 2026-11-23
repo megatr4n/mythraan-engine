@@ -1,5 +1,6 @@
 //! Event queues through the public ECS API.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use mythraan_ecs::EventReadError;
@@ -86,4 +87,62 @@ fn reading_another_queue_leaves_the_cursor_unchanged() {
     assert!(matches!(reader.read(&second), Err(EventReadError)));
     assert_eq!(reader.read(&first).unwrap().next(), Some(&10));
     assert_eq!(reader.read(&first).unwrap().next(), None);
+}
+
+#[test]
+fn iterator_adaptors_advance_the_cursor_across_both_buffers() {
+    let mut events = Events::new();
+    let mut reader = events.reader();
+    events.writer().send(1).unwrap();
+    events.writer().send(2).unwrap();
+    events.advance_frame();
+    events.writer().send(3).unwrap();
+    events.writer().send(4).unwrap();
+
+    assert_eq!(reader.read(&events).unwrap().nth(2), Some(&3));
+    assert_eq!(reader.read(&events).unwrap().count(), 1);
+    assert_eq!(reader.read(&events).unwrap().next(), None);
+    events.writer().send(5).unwrap();
+    assert_eq!(reader.read(&events).unwrap().next(), Some(&5));
+}
+
+#[test]
+fn unwinding_during_expiry_preserves_retained_events() {
+    struct DropEvent {
+        id: u32,
+        panic_on_drop: bool,
+    }
+
+    impl Drop for DropEvent {
+        fn drop(&mut self) {
+            assert!(!self.panic_on_drop, "event destructor unwound");
+        }
+    }
+
+    let mut events = Events::new();
+    let mut reader = events.reader();
+    events
+        .writer()
+        .send(DropEvent {
+            id: 1,
+            panic_on_drop: true,
+        })
+        .unwrap();
+    events.advance_frame();
+    events
+        .writer()
+        .send(DropEvent {
+            id: 2,
+            panic_on_drop: false,
+        })
+        .unwrap();
+
+    assert!(catch_unwind(AssertUnwindSafe(|| events.advance_frame())).is_err());
+    assert_eq!(
+        reader.read(&events).unwrap().next().map(|event| event.id),
+        Some(2)
+    );
+    assert_eq!(reader.read(&events).unwrap().count(), 0);
+    events.advance_frame();
+    assert_eq!(events.reader().read(&events).unwrap().count(), 0);
 }

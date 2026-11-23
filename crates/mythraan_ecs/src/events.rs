@@ -145,3 +145,33 @@ impl<'read, T> Iterator for UnreadEvents<'read, T> {
 }
 
 impl<T> FusedIterator for UnreadEvents<'_, T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exhausted_sequence_preserves_the_last_event_and_existing_readers() {
+        let mut events = Events {
+            start: u64::MAX - 1,
+            end: u64::MAX - 1,
+            ..Events::new()
+        };
+        let mut reader = events.reader();
+        events.writer().send(41).unwrap();
+        assert!(matches!(
+            events.writer().send(42),
+            Err(EventWriteError::SequenceExhausted)
+        ));
+
+        events.advance_frame();
+        assert_eq!(reader.read(&events).unwrap().next(), Some(&41));
+        assert_eq!(reader.read(&events).unwrap().next(), None);
+        events.advance_frame();
+        assert_eq!(reader.read(&events).unwrap().next(), None);
+        assert!(matches!(
+            events.writer().send(43),
+            Err(EventWriteError::SequenceExhausted)
+        ));
+    }
+}
