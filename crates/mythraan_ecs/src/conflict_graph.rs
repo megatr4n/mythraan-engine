@@ -7,6 +7,21 @@ use crate::{AccessSet, SystemAccess};
 ///
 /// Vertices are the indices of the supplied access sets. A path orders each
 /// conflicting pair, so an edge may be omitted when other edges enforce it.
+/// Component and resource access are tracked independently. Deferred queues
+/// are for structural changes at the scheduler's sync point.
+///
+/// ```
+/// use mythraan_ecs::prelude::{ConflictGraph, Query, QueryMut, ResMut, SystemAccess};
+///
+/// let graph = ConflictGraph::new(&[
+///     SystemAccess::of::<QueryMut<'_, &mut u32>>(),
+///     SystemAccess::of::<Query<'_, &u32>>(),
+///     SystemAccess::of::<ResMut<'_, u32>>(),
+/// ]);
+///
+/// assert_eq!(graph.predecessors(1), Some([0].as_slice()));
+/// assert_eq!(graph.batches().collect::<Vec<_>>(), [&[0, 2][..], &[1]]);
+/// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct ConflictGraph {
     predecessors: Vec<Vec<usize>>,
@@ -52,7 +67,8 @@ impl ConflictGraph {
         self.predecessors.get(system).map(Vec::as_slice)
     }
 
-    /// Returns compatible batches in dependency order.
+    /// Returns compatible batches in dependency order, placing each system
+    /// in the earliest batch after its prerequisites.
     ///
     /// Within each batch, systems appear in registration order.
     pub fn batches(&self) -> impl ExactSizeIterator<Item = &[usize]> {
