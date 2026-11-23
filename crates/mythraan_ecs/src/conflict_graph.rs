@@ -32,29 +32,30 @@ impl ConflictGraph {
     /// Builds the graph from access sets in registration order.
     #[must_use]
     pub fn new(systems: &[SystemAccess]) -> Self {
+        Self::in_order(systems, 0..systems.len(), Vec::new())
+    }
+
+    pub(crate) fn in_order(
+        systems: &[SystemAccess],
+        order: impl Iterator<Item = usize> + Clone,
+        mut predecessors: Vec<Vec<usize>>,
+    ) -> Self {
         let mut components = BTreeMap::new();
         let mut resources = BTreeMap::new();
-        let mut predecessors = Vec::with_capacity(systems.len());
+        predecessors.resize_with(systems.len(), Vec::new);
 
-        for (system, access) in systems.iter().enumerate() {
-            let mut dependencies = Vec::new();
-            record_access(
-                access.components(),
-                &mut components,
-                system,
-                &mut dependencies,
-            );
-            record_access(
-                access.resources(),
-                &mut resources,
-                system,
-                &mut dependencies,
-            );
+        for system in order.clone() {
+            let (Some(access), Some(dependencies)) =
+                (systems.get(system), predecessors.get_mut(system))
+            else {
+                continue;
+            };
+            record_access(access.components(), &mut components, system, dependencies);
+            record_access(access.resources(), &mut resources, system, dependencies);
             dependencies.sort_unstable();
             dependencies.dedup();
-            predecessors.push(dependencies);
         }
-        let batches = build_batches(&predecessors);
+        let batches = build_batches(&predecessors, order);
         Self {
             predecessors,
             batches,
@@ -76,20 +77,31 @@ impl ConflictGraph {
     }
 }
 
-fn build_batches(predecessors: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    let mut levels = Vec::with_capacity(predecessors.len());
-    let mut batches: Vec<Vec<usize>> = Vec::new();
-    for (system, dependencies) in predecessors.iter().enumerate() {
+fn build_batches(
+    predecessors: &[Vec<usize>],
+    order: impl Iterator<Item = usize>,
+) -> Vec<Vec<usize>> {
+    let mut levels = vec![0; predecessors.len()];
+    for system in order {
+        let Some(dependencies) = predecessors.get(system) else {
+            continue;
+        };
         let level = dependencies
             .iter()
             .filter_map(|&dependency| levels.get(dependency).copied())
             .max()
             .map_or(0, |previous| previous + 1);
-        levels.push(level);
+        if let Some(slot) = levels.get_mut(system) {
+            *slot = level;
+        }
+    }
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    for (system, level) in levels.into_iter().enumerate() {
+        if level >= batches.len() {
+            batches.resize_with(level + 1, Vec::new);
+        }
         if let Some(batch) = batches.get_mut(level) {
             batch.push(system);
-        } else {
-            batches.push(vec![system]);
         }
     }
     batches
@@ -121,5 +133,32 @@ fn record_access(
             dependencies.append(&mut entry.readers);
         }
         entry.writer = Some(system);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConflictGraph;
+    use crate::{Res, ResMut, SystemAccess};
+
+    #[test]
+    fn conflict_edges_follow_the_configured_topological_order() {
+        let systems = [
+            SystemAccess::of::<ResMut<'_, u32>>(),
+            SystemAccess::of::<Res<'_, u32>>(),
+            SystemAccess::of::<ResMut<'_, u32>>(),
+            SystemAccess::of::<()>(),
+        ];
+        let graph = ConflictGraph::in_order(
+            &systems,
+            [2, 0, 1, 3].into_iter(),
+            vec![vec![2], vec![], vec![], vec![]],
+        );
+        assert_eq!(graph.predecessors(0), Some([2].as_slice()));
+        assert_eq!(graph.predecessors(1), Some([0].as_slice()));
+        assert_eq!(
+            graph.batches().collect::<Vec<_>>(),
+            [&[2, 3][..], &[0], &[1]]
+        );
     }
 }
