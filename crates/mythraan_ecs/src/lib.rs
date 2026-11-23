@@ -44,3 +44,9 @@ pub use sparse_set::SparseSet;
 pub use stages::Stages;
 pub use system_access::{AccessSet, SystemAccess, SystemParam};
 pub use world::{ScopedComponents, ScopedResources, SystemScope, World};
+
+#[cfg(feature = "reflect")]
+pub use error::ReflectComponentError;
+/// Runtime type and field reflection used by ECS.
+#[cfg(feature = "reflect")]
+pub use mythraan_reflect as reflection;

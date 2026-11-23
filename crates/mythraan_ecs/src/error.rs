@@ -10,6 +10,21 @@ use crate::Entity;
 #[error("world change tick exhausted")]
 pub struct ChangeTickError;
 
+/// A reflected component or field could not be accessed.
+#[cfg(feature = "reflect")]
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ReflectComponentError {
+    /// No component was registered with this type identifier.
+    #[error("component type {0:?} is unregistered")]
+    UnregisteredType(TypeId),
+    /// The entity is stale or has no component of the requested type.
+    #[error("entity {0:?} does not have the requested component")]
+    MissingComponent(Entity),
+    /// The component exposes no field with this name.
+    #[error("component has no exposed field named {0:?}")]
+    UnknownField(String),
+}
+
 /// Invalid ordering or configuration for a schedule.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ScheduleConfigError {

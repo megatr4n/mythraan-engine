@@ -12,6 +12,8 @@ use crate::{
     WriteQuery,
 };
 
+#[cfg(feature = "reflect")]
+mod reflection;
 mod scope;
 mod transforms;
 pub(crate) use scope::{Borrowed, ensure_access};
@@ -45,6 +47,8 @@ pub struct World {
     change_tick: NonZeroU64,
     hierarchy: Hierarchy,
     transforms: TransformPropagation,
+    #[cfg(feature = "reflect")]
+    reflected: reflection::ReflectedComponents,
 }
 
 impl Default for World {
@@ -56,6 +60,8 @@ impl Default for World {
             change_tick: NonZeroU64::MIN,
             hierarchy: Hierarchy::default(),
             transforms: TransformPropagation::default(),
+            #[cfg(feature = "reflect")]
+            reflected: reflection::ReflectedComponents::default(),
         }
     }
 }
