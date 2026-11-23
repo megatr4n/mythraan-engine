@@ -224,3 +224,18 @@ impl World {
         erased.downcast_mut()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_tick_does_not_wrap_after_exhaustion() {
+        let mut world = World {
+            change_tick: NonZeroU64::MAX,
+            ..World::new()
+        };
+        assert_eq!(world.advance_change_tick(), Err(ChangeTickError));
+        assert_eq!(world.change_tick(), u64::MAX);
+    }
+}
