@@ -6,9 +6,9 @@ type Insert = dyn FnOnce(&mut World, Entity) -> Result<(), WorldInsertError> + S
 
 enum Command {
     Spawn,
-    Despawn(Entity),
-    Insert(Entity, Box<Insert>),
-    Remove(Entity, fn(&mut World, Entity)),
+    Despawn(Target),
+    Insert(Target, Box<Insert>),
+    Remove(Target, fn(&mut World, Entity)),
 }
 
 impl Command {
@@ -23,19 +23,40 @@ impl Command {
                 spawned.push(result.as_ref().ok().copied());
                 result?;
             }
-            Self::Despawn(entity) => {
-                world.despawn(entity);
+            Self::Despawn(target) => {
+                world.despawn(target.resolve(spawned)?);
             }
-            Self::Insert(entity, insert) => insert(world, entity)?,
-            Self::Remove(entity, remove) => remove(world, entity),
+            Self::Insert(target, insert) => insert(world, target.resolve(spawned)?)?,
+            Self::Remove(target, remove) => remove(world, target.resolve(spawned)?),
         }
         Ok(())
+    }
+}
+
+enum Target {
+    Entity(Entity),
+    Deferred(usize),
+    ForeignPlaceholder,
+}
+
+impl Target {
+    fn resolve(self, spawned: &[Option<Entity>]) -> Result<Entity, CommandError> {
+        match self {
+            Self::Entity(entity) => Ok(entity),
+            Self::Deferred(index) => spawned
+                .get(index)
+                .copied()
+                .flatten()
+                .ok_or(CommandError::UnresolvedPlaceholder),
+            Self::ForeignPlaceholder => Err(CommandError::ForeignPlaceholder),
+        }
     }
 }
 
 /// A placeholder for an entity queued by [`CommandBuffer::spawn`].
 ///
 /// The placeholder belongs to one batch in the buffer that issued it.
+/// Pass it by reference when queuing another command in that batch.
 /// Obtain its entity identifier from that batch's [`FlushReport`].
 #[derive(Clone, Debug)]
 pub struct DeferredEntity {
@@ -46,6 +67,27 @@ pub struct DeferredEntity {
 impl DeferredEntity {
     fn belongs_to(&self, batch: Option<&Arc<()>>) -> bool {
         batch.is_some_and(|batch| Arc::ptr_eq(batch, &self.batch))
+    }
+}
+
+/// The entity addressed by a command.
+#[derive(Clone, Copy, Debug)]
+pub enum CommandTarget<'entity> {
+    /// An existing entity from the world being flushed.
+    Entity(Entity),
+    /// An entity queued for creation in the current batch.
+    Deferred(&'entity DeferredEntity),
+}
+
+impl From<Entity> for CommandTarget<'_> {
+    fn from(entity: Entity) -> Self {
+        Self::Entity(entity)
+    }
+}
+
+impl<'entity> From<&'entity DeferredEntity> for CommandTarget<'entity> {
+    fn from(entity: &'entity DeferredEntity) -> Self {
+        Self::Deferred(entity)
     }
 }
 
@@ -91,6 +133,8 @@ impl FlushReport {
 ///
 /// The buffer can be filled while a query borrows the world. Applying the
 /// changes requires exclusive access to that world.
+/// Commands can target an existing entity or a placeholder returned by this
+/// buffer in the current batch. Invalid placeholders are reported at flush.
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: Vec<Command>,
@@ -120,23 +164,33 @@ impl CommandBuffer {
     /// Queues removal of an entity and its components.
     ///
     /// An entity that is already dead at flush time is ignored.
-    pub fn despawn(&mut self, entity: Entity) {
-        self.commands.push(Command::Despawn(entity));
+    pub fn despawn<'entity>(&mut self, entity: impl Into<CommandTarget<'entity>>) {
+        let target = self.target(entity.into());
+        self.commands.push(Command::Despawn(target));
     }
 
     /// Queues insertion or replacement of a component.
     ///
     /// The buffer owns the value until it is applied or discarded.
-    pub fn insert<T: Send + Sync + 'static>(&mut self, entity: Entity, component: T) {
+    pub fn insert<'entity, T: Send + Sync + 'static>(
+        &mut self,
+        entity: impl Into<CommandTarget<'entity>>,
+        component: T,
+    ) {
+        let target = self.target(entity.into());
         self.commands.push(Command::Insert(
-            entity,
+            target,
             Box::new(move |world, entity| world.insert(entity, component).map(drop)),
         ));
     }
 
     /// Queues removal of a component, if it is present at flush time.
-    pub fn remove<T: Send + Sync + 'static>(&mut self, entity: Entity) {
-        self.commands.push(Command::Remove(entity, |world, entity| {
+    pub fn remove<'entity, T: Send + Sync + 'static>(
+        &mut self,
+        entity: impl Into<CommandTarget<'entity>>,
+    ) {
+        let target = self.target(entity.into());
+        self.commands.push(Command::Remove(target, |world, entity| {
             drop(world.remove::<T>(entity));
         }));
     }
@@ -158,5 +212,15 @@ impl CommandBuffer {
             }
         }
         report
+    }
+
+    fn target(&self, target: CommandTarget<'_>) -> Target {
+        match target {
+            CommandTarget::Entity(entity) => Target::Entity(entity),
+            CommandTarget::Deferred(entity) if entity.belongs_to(self.batch.as_ref()) => {
+                Target::Deferred(entity.index)
+            }
+            CommandTarget::Deferred(_) => Target::ForeignPlaceholder,
+        }
     }
 }

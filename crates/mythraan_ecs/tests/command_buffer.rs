@@ -125,3 +125,61 @@ fn spawn_reports_resolve_only_their_own_batch() {
     assert_eq!(first_report.resolve(&foreign), None);
     assert_eq!(second_report.resolve(&foreign), None);
 }
+
+#[test]
+fn placeholder_targets_apply_in_order_even_when_an_index_is_reused() {
+    let mut world = World::new();
+    let mut commands = CommandBuffer::new();
+
+    let first = commands.spawn();
+    commands.insert(&first, 13_u32);
+    commands.despawn(&first);
+    let second = commands.spawn();
+    commands.insert(&second, 17_u32);
+    commands.remove::<u32>(&second);
+    commands.insert(&second, true);
+    commands.remove::<bool>(&first);
+
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    let first = report.resolve(&first).unwrap();
+    let second = report.resolve(&second).unwrap();
+    assert_eq!(first.index(), second.index());
+    assert!(!world.is_alive(first));
+    assert_eq!(world.get::<u32>(second), None);
+    assert_eq!(world.get::<bool>(second), Some(&true));
+}
+
+#[test]
+fn foreign_and_previous_batch_placeholders_cannot_target_a_local_spawn() {
+    let mut world = World::new();
+    let mut commands = CommandBuffer::new();
+    let previous = commands.spawn();
+    let previous_report = commands.flush(&mut world);
+    let previous_live = previous_report.resolve(&previous).unwrap();
+
+    let foreign = CommandBuffer::new().spawn();
+    let local = commands.spawn();
+    commands.insert(&foreign, 21_u32);
+    commands.despawn(&previous);
+    commands.insert(&local, true);
+
+    let report = commands.flush(&mut world);
+    let [foreign_failure, previous_failure] = report.failures() else {
+        panic!("expected two failed commands, got {report:?}");
+    };
+    assert_eq!(foreign_failure.index, 1);
+    assert_eq!(previous_failure.index, 2);
+    assert!(matches!(
+        foreign_failure.error,
+        CommandError::ForeignPlaceholder
+    ));
+    assert!(matches!(
+        previous_failure.error,
+        CommandError::ForeignPlaceholder
+    ));
+    let local = report.resolve(&local).unwrap();
+    assert_eq!(world.get::<bool>(local), Some(&true));
+    assert_eq!(world.get::<u32>(local), None);
+    assert!(world.is_alive(previous_live));
+}

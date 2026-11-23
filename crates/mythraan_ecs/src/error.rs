@@ -7,6 +7,12 @@ use crate::Entity;
 /// A queued structural change failed during a flush.
 #[derive(Debug, Error)]
 pub enum CommandError {
+    /// A command used a placeholder from a different buffer or batch.
+    #[error("entity placeholder belongs to a different command batch")]
+    ForeignPlaceholder,
+    /// The spawn for a command's placeholder failed.
+    #[error("entity placeholder has no successful spawn in this batch")]
+    UnresolvedPlaceholder,
     /// An identifier could not be allocated for a queued spawn.
     #[error(transparent)]
     Spawn(#[from] EntityAllocError),
