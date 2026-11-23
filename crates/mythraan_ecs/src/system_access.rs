@@ -1,19 +1,39 @@
 use std::any::TypeId;
 use std::collections::BTreeSet;
 
-use crate::{Query, ReadQuery, Res};
+use crate::{Query, ReadQuery, Res, ResMut};
 
 /// The types accessed in one kind of ECS storage.
+///
+/// Types in the write set also permit reads of their values.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccessSet {
     reads: BTreeSet<TypeId>,
+    writes: BTreeSet<TypeId>,
 }
 
 impl AccessSet {
-    /// Returns the types accessed through shared references.
+    /// Returns the types accessed only through shared references.
     #[must_use]
     pub fn reads(&self) -> &BTreeSet<TypeId> {
         &self.reads
+    }
+
+    /// Returns the types accessed exclusively.
+    #[must_use]
+    pub fn writes(&self) -> &BTreeSet<TypeId> {
+        &self.writes
+    }
+
+    fn read(&mut self, id: TypeId) {
+        if !self.writes.contains(&id) {
+            self.reads.insert(id);
+        }
+    }
+
+    fn write(&mut self, id: TypeId) {
+        self.reads.remove(&id);
+        self.writes.insert(id);
     }
 }
 
@@ -46,7 +66,7 @@ impl SystemAccess {
     }
 
     pub(crate) fn read_component(&mut self, id: TypeId) {
-        self.components.reads.insert(id);
+        self.components.read(id);
     }
 }
 
@@ -71,6 +91,12 @@ impl<Q: ReadQuery> sealed::Param for Query<'_, Q> {
 
 impl<T: Send + Sync + 'static> sealed::Param for Res<'_, T> {
     fn record_access(access: &mut SystemAccess) {
-        access.resources.reads.insert(TypeId::of::<T>());
+        access.resources.read(TypeId::of::<T>());
+    }
+}
+
+impl<T: Send + Sync + 'static> sealed::Param for ResMut<'_, T> {
+    fn record_access(access: &mut SystemAccess) {
+        access.resources.write(TypeId::of::<T>());
     }
 }

@@ -1,7 +1,7 @@
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::mem;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 /// Stores one shared value of each Rust type.
 #[derive(Default)]
@@ -24,6 +24,31 @@ impl<T> Deref for Res<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
+        self.0
+    }
+}
+
+/// A system's exclusive borrow of the resource of type `T`.
+pub struct ResMut<'world, T>(&'world mut T);
+
+impl<'world, T: Send + Sync + 'static> ResMut<'world, T> {
+    /// Mutably borrows the resource if it is present.
+    #[must_use]
+    pub fn from_resources(resources: &'world mut Resources) -> Option<Self> {
+        resources.get_mut().map(Self)
+    }
+}
+
+impl<T> Deref for ResMut<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.0
+    }
+}
+
+impl<T> DerefMut for ResMut<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
         self.0
     }
 }

@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::collections::BTreeSet;
 
 use mythraan_ecs::SystemAccess;
-use mythraan_ecs::prelude::{Query, Res, Resources};
+use mythraan_ecs::prelude::{Query, Res, ResMut, Resources};
 
 #[test]
 fn shared_queries_declare_every_component_type_once() {
@@ -38,4 +38,21 @@ fn shared_resources_have_their_own_access_set() {
     assert!(Res::<u32>::from_resources(&resources).is_none());
     resources.insert(12_u32);
     assert_eq!(*Res::<u32>::from_resources(&resources).unwrap(), 12);
+}
+
+#[test]
+fn mutable_resources_declare_exclusive_access() {
+    let access = SystemAccess::of::<ResMut<'_, u32>>();
+    assert_eq!(
+        access.resources().writes(),
+        &BTreeSet::from([TypeId::of::<u32>()])
+    );
+    assert!(access.resources().reads().is_empty());
+    assert!(access.components().writes().is_empty());
+
+    let mut resources = Resources::new();
+    assert!(ResMut::<u32>::from_resources(&mut resources).is_none());
+    resources.insert(12_u32);
+    *ResMut::<u32>::from_resources(&mut resources).unwrap() += 4;
+    assert_eq!(resources.get::<u32>(), Some(&16));
 }
