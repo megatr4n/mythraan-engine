@@ -266,12 +266,30 @@ fn measure_despawn(bencher: &mut Bencher<'_>, mut fixture: DespawnFixture) {
 }
 
 fn despawn_storages(c: &mut Criterion) {
-    let mut group = c.benchmark_group("despawn_storages");
+    despawn_axis(c, "despawn_storages", [4, 8, 16, 32, 50], |storages| {
+        (storages, 4)
+    });
+}
+
+fn despawn_components(c: &mut Criterion) {
+    despawn_axis(c, "despawn_components", [1, 4, 16], |components| {
+        (32, components)
+    });
+}
+
+fn despawn_axis<const N: usize>(
+    c: &mut Criterion,
+    name: &str,
+    counts: [usize; N],
+    dimensions: impl Fn(usize) -> (usize, usize),
+) {
+    let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(DESPAWNS as u64));
     for (name, extra) in Extra::cases() {
-        for storage_count in [4, 8, 16, 32, 50] {
-            group.bench_function(BenchmarkId::new(name, storage_count), |bencher| {
-                measure_despawn(bencher, DespawnFixture::new(storage_count, 4, extra));
+        for count in counts {
+            let (storages, components) = dimensions(count);
+            group.bench_function(BenchmarkId::new(name, count), |bencher| {
+                measure_despawn(bencher, DespawnFixture::new(storages, components, extra));
             });
         }
     }
@@ -285,7 +303,7 @@ criterion_group! {
         .sample_size(30)
         .warm_up_time(Duration::from_millis(650))
         .measurement_time(Duration::from_millis(1_350));
-    targets = sparse_removal, tracked_removal, component_lookup, despawn_storages
+    targets = sparse_removal, tracked_removal, component_lookup, despawn_storages, despawn_components
 }
 
 criterion_main!(benches);
