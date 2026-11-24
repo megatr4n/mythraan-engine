@@ -1,22 +1,25 @@
 //! Measures ECS queries, deferred mutations, and cached schedule execution.
 
 use std::hint::black_box;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use mythraan_ecs::prelude::{CommandBuffer, Schedule, SystemAccess, With, Without, World};
+use mythraan_ecs::prelude::{
+    CommandBuffer, DeferredEntity, Entity, Schedule, SystemAccess, With, Without, World,
+};
 
 const ENTITY_COUNT: u64 = 100_000;
 const COMMAND_ENTITIES: u64 = 1_024;
+const CHURN_PERIOD: usize = 10;
 
 struct Position(u64);
 struct Velocity(u64);
 struct Moving;
 struct Disabled;
 
-fn populated_world() -> World {
+fn populated_world(reverse_velocity: bool) -> World {
     let mut world = World::new();
-    let entities = (0..ENTITY_COUNT)
+    let mut entities = (0..ENTITY_COUNT)
         .map(|index| {
             let entity = world.spawn().unwrap();
             world.insert(entity, Position(index)).unwrap();
@@ -30,7 +33,10 @@ fn populated_world() -> World {
         })
         .collect::<Vec<_>>();
 
-    for (entity, index) in entities.into_iter().rev() {
+    if reverse_velocity {
+        entities.reverse();
+    }
+    for (entity, index) in entities {
         world.insert(entity, Velocity(3 * index + 1)).unwrap();
     }
     world
@@ -51,7 +57,7 @@ fn read_position_and_velocity(world: &World) -> u64 {
 }
 
 fn queries(c: &mut Criterion) {
-    let mut world = populated_world();
+    let mut world = populated_world(true);
     let expected_sum = ENTITY_COUNT * (ENTITY_COUNT - 1) / 2;
     assert_eq!(world.query::<&Position>().count() as u64, ENTITY_COUNT);
     assert_eq!(
@@ -94,6 +100,131 @@ fn queries(c: &mut Criterion) {
                 .query_filtered_mut::<&mut Position, (With<Moving>, Without<Disabled>)>()
                 .unwrap()
                 .for_each(|_, position| position.0 = position.0.wrapping_add(1));
+        });
+    });
+    let aligned = populated_world(false);
+    assert_eq!(
+        read_position_and_velocity(&aligned),
+        4 * expected_sum + ENTITY_COUNT
+    );
+    group.throughput(Throughput::Elements(ENTITY_COUNT));
+    group.bench_function("read_position_and_velocity_aligned", |b| {
+        b.iter(|| black_box(read_position_and_velocity(black_box(&aligned))));
+    });
+    group.finish();
+}
+
+fn query_setup(c: &mut Criterion) {
+    let mut world = populated_world(true);
+    let mut group = c.benchmark_group("world_query_setup");
+    group.bench_function("read_position_and_velocity", |b| {
+        b.iter(|| black_box(black_box(&world).query::<(&Position, &Velocity)>()));
+    });
+    group.bench_function("write_enabled_movers", |b| {
+        b.iter(|| {
+            let _ = black_box(
+                black_box(&mut world)
+                    .query_filtered_mut::<&mut Position, (With<Moving>, Without<Disabled>)>()
+                    .unwrap(),
+            );
+        });
+    });
+    group.finish();
+}
+
+struct ChurnFrame {
+    world: World,
+    live: Vec<Entity>,
+    commands: CommandBuffer,
+    replacements: Vec<DeferredEntity>,
+    phase: usize,
+}
+
+impl ChurnFrame {
+    fn new() -> Self {
+        let world = populated_world(true);
+        let live = world
+            .query::<&Position>()
+            .map(|(entity, _)| entity)
+            .collect();
+        let mut frame = Self {
+            world,
+            live,
+            commands: CommandBuffer::new(),
+            replacements: Vec::with_capacity(ENTITY_COUNT as usize / CHURN_PERIOD),
+            phase: 0,
+        };
+        let retired = frame.live[0];
+        for _ in 0..CHURN_PERIOD {
+            frame.advance();
+        }
+        assert!(!frame.world.is_alive(retired));
+        assert_eq!(
+            frame.world.query::<(&Position, &Velocity)>().count() as u64,
+            ENTITY_COUNT
+        );
+        assert_eq!(
+            read_position_and_velocity(&frame.world),
+            2 * ENTITY_COUNT * (ENTITY_COUNT - 1) + ENTITY_COUNT
+        );
+        frame
+    }
+
+    fn advance(&mut self) {
+        self.world.advance_change_tick().unwrap();
+        let phase = self.phase;
+        // Stagger the selection in pairs of groups to preserve the tag mix in every frame.
+        let selected = (0..self.live.len() / CHURN_PERIOD)
+            .map(move |group| group * CHURN_PERIOD + (phase + group / 2) % CHURN_PERIOD);
+        for index in selected.clone() {
+            self.commands.despawn(self.live[index]);
+        }
+        for index in selected.clone() {
+            let spawned = self.commands.spawn();
+            self.commands.insert(&spawned, Position(index as u64));
+            if index % 2 == 0 {
+                self.commands.insert(&spawned, Moving);
+            }
+            if index % 4 == 0 {
+                self.commands.insert(&spawned, Disabled);
+            }
+            self.replacements.push(spawned);
+        }
+        // Separate insertion streams keep exercising different dense orders after slot reuse.
+        for (index, entity) in selected.clone().zip(&self.replacements).rev() {
+            self.commands.insert(entity, Velocity(3 * index as u64 + 1));
+        }
+
+        let report = self.commands.flush(&mut self.world);
+        assert!(report.failures().is_empty());
+        for (index, entity) in selected.zip(self.replacements.drain(..)) {
+            self.live[index] = report.resolve(&entity).unwrap();
+        }
+        self.phase = (self.phase + 1) % CHURN_PERIOD;
+    }
+}
+
+fn frames_with_churn(c: &mut Criterion) {
+    let mut group = c.benchmark_group("world_frame");
+    group.throughput(Throughput::Elements(ENTITY_COUNT));
+    let mut frame = ChurnFrame::new();
+    group.bench_function("read_after_churn", |b| {
+        b.iter_custom(|iterations| {
+            let mut elapsed = Duration::ZERO;
+            for _ in 0..iterations {
+                frame.advance();
+                let start = Instant::now();
+                black_box(read_position_and_velocity(black_box(&frame.world)));
+                elapsed += start.elapsed();
+            }
+            elapsed
+        });
+    });
+    let mut frame = ChurnFrame::new();
+    group.bench_function("churn_and_read", |b| {
+        b.iter(|| {
+            frame.advance();
+            black_box(read_position_and_velocity(black_box(&frame.world)));
         });
     });
     group.finish();
@@ -158,7 +289,7 @@ criterion_group! {
         .sample_size(40)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = queries, deferred_lifecycle, cached_schedule
+    targets = queries, query_setup, frames_with_churn, deferred_lifecycle, cached_schedule
 }
 
 criterion_main!(benches);
