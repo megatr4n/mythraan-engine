@@ -1,6 +1,8 @@
 //! Read-only query behavior through the public ECS API.
 
-use mythraan_ecs::prelude::{Query, World};
+use mythraan_ecs::prelude::{CommandBuffer, Entity, Query, World};
+use proptest::prelude::*;
+use proptest::test_runner::RngSeed;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Health(u32);
@@ -181,4 +183,114 @@ fn triple_query_checks_every_required_component() {
         values,
         [(complete, (&Speed(7), &Health(42), &Position(21)))]
     );
+}
+
+struct Sample<const ID: usize>(u32);
+
+fn populate_column<const ID: usize>(world: &mut World, rows: &[(Entity, u8, u16)]) {
+    for offset in 0..rows.len() {
+        let index = if ID.is_multiple_of(2) {
+            offset
+        } else {
+            rows.len() - 1 - offset
+        };
+        let (entity, mask, sample) = rows[index];
+        if mask & (1 << ID) != 0 {
+            let value = u32::from(sample) * 4 + ID as u32;
+            world.insert(entity, Sample::<ID>(value)).unwrap();
+        }
+    }
+}
+
+fn assert_sparse_join(world: &World, handles: &[Entity]) {
+    let rare_rows = handles
+        .iter()
+        .filter(|&&entity| world.get::<Sample<0>>(entity).is_some())
+        .count();
+
+    macro_rules! assert_join {
+        ($($id:literal => $value:ident),+ $(,)?) => {{
+            let key = |entity: Entity| (entity.index(), entity.generation());
+            let mut expected: Vec<_> = handles.iter().filter_map(|&entity| {
+                Some((entity, ($(world.get::<Sample<$id>>(entity)?.0,)+)))
+            }).collect();
+            expected.sort_unstable_by_key(|&(entity, _)| key(entity));
+
+            let mut query = world.query::<($(&Sample<$id>,)+)>();
+            assert_eq!(query.size_hint(), (0, Some(rare_rows)));
+            let mut actual: Vec<_> = (&mut query)
+                .map(|(entity, ($($value,)+))| (entity, ($($value.0,)+)))
+                .collect();
+            actual.sort_unstable_by_key(|&(entity, _)| key(entity));
+            assert_eq!(actual, expected);
+            assert_eq!(query.size_hint(), (0, Some(0)));
+        }};
+    }
+
+    assert_join!(0 => a);
+    assert_join!(1 => b, 0 => a);
+    assert_join!(1 => b, 2 => c, 0 => a);
+    assert_join!(0 => a, 1 => b, 2 => c, 3 => d);
+    assert_join!(1 => b, 0 => a, 2 => c, 3 => d);
+    assert_join!(1 => b, 2 => c, 0 => a, 3 => d);
+    assert_join!(1 => b, 2 => c, 3 => d, 0 => a);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: if cfg!(miri) { 6 } else { 256 },
+        rng_seed: RngSeed::Fixed(0x4d59_5448_4452_4956),
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn tuple_queries_match_direct_reads_across_deferred_despawns(
+        random in prop::collection::vec(
+            (any::<u8>(), any::<u16>(), any::<bool>()),
+            0..=if cfg!(miri) { 12 } else { 96 },
+        ),
+    ) {
+        let mut world = World::new();
+        // Keep column 0 strictly shortest and include a row missing its secondary components.
+        let anchors = [(15, 11), (15, 22), (1, 33), (14, 44), (14, 55)];
+        let mut rows: Vec<_> = anchors.into_iter().map(|(mask, value)| {
+            (world.spawn().unwrap(), mask, value)
+        }).collect();
+        let mut dead = vec![rows[1].0];
+        for (mask, value, despawn) in random {
+            let entity = world.spawn().unwrap();
+            let mask = if mask & 1 == 0 { mask & 14 } else { 15 };
+            rows.push((entity, mask, value));
+            if despawn {
+                dead.push(entity);
+            }
+        }
+
+        populate_column::<0>(&mut world, &rows);
+        populate_column::<1>(&mut world, &rows);
+        populate_column::<2>(&mut world, &rows);
+        populate_column::<3>(&mut world, &rows);
+        let mut handles: Vec<_> = rows.iter().map(|&(entity, _, _)| entity).collect();
+
+        let mut commands = CommandBuffer::new();
+        for &entity in &dead {
+            commands.despawn(entity);
+        }
+        let pending = commands.spawn();
+        commands.insert(&pending, Sample::<1>(111));
+        commands.insert(&pending, Sample::<2>(222));
+        commands.insert(&pending, Sample::<3>(333));
+        assert_sparse_join(&world, &handles);
+
+        let report = commands.flush(&mut world);
+        assert!(report.failures().is_empty());
+        assert!(dead.iter().all(|&entity| !world.is_alive(entity)));
+        let reused = report.resolve(&pending).unwrap();
+        let previous = dead.last().unwrap();
+        assert_eq!(reused.index(), previous.index());
+        assert_ne!(reused.generation(), previous.generation());
+        handles.push(reused);
+        assert_sparse_join(&world, &handles);
+    }
 }
