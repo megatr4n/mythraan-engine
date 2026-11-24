@@ -17,7 +17,10 @@ impl<T: Send + Sync + 'static> Column for VecDeque<T> {
     }
 
     fn discard_next(&mut self) {
-        drop(self.pop_front());
+        if !self.is_empty() {
+            // Dropping the drain destroys the front value in place.
+            drop(self.drain(..1));
+        }
     }
 }
 
