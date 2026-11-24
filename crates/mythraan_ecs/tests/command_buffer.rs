@@ -387,3 +387,49 @@ fn dropping_a_buffer_finishes_discarding_after_a_payload_panics() {
     assert!(catch_unwind(AssertUnwindSafe(|| drop(commands))).is_err());
     log.expect(&["panic", "after other", "after same"]);
 }
+
+#[test]
+fn a_panicking_rejected_insert_preserves_the_prefix_and_discards_the_tail() {
+    for foreign_target in [false, true] {
+        let log = DropLog::new();
+        let mut world = World::new();
+        let live = world.spawn().unwrap();
+        let dead = world.spawn().unwrap();
+        let mut commands = CommandBuffer::new();
+        commands.insert(live, log.component("prefix", false));
+        commands.despawn(dead);
+        let foreign = CommandBuffer::new().spawn();
+        let rejected = log.component("rejected", true);
+        if foreign_target {
+            commands.insert(&foreign, rejected);
+        } else {
+            commands.insert(dead, rejected);
+        }
+        commands.remove::<RecordedDrop>(live);
+        let skipped = commands.spawn();
+        commands.insert(
+            &skipped,
+            OtherDrop {
+                _component: log.component("other", false),
+            },
+        );
+        commands.insert(live, log.component("same", false));
+
+        assert!(catch_unwind(AssertUnwindSafe(|| commands.flush(&mut world))).is_err());
+        log.expect(&["rejected", "other", "same"]);
+        assert!(!world.is_alive(dead));
+        assert_eq!(world.get::<RecordedDrop>(live).unwrap().name, "prefix");
+
+        let next = commands.spawn();
+        commands.insert(&next, log.component("next", false));
+        let report = commands.flush(&mut world);
+        assert!(report.failures().is_empty());
+        assert_eq!(report.resolve(&skipped), None);
+        let next = report.resolve(&next).unwrap();
+        assert_eq!(next.index(), dead.index());
+        assert_ne!(next.generation(), dead.generation());
+        drop(world.remove::<RecordedDrop>(next));
+        drop(world.remove::<RecordedDrop>(live));
+        log.expect(&["rejected", "other", "same", "next", "prefix"]);
+    }
+}
