@@ -1,13 +1,16 @@
 use std::sync::Arc;
+use std::vec::Drain;
 
-use crate::{CommandError, Entity, World, WorldInsertError};
+use crate::{CommandError, Entity, World};
 
-type Insert = dyn FnOnce(&mut World, Entity) -> Result<(), WorldInsertError> + Send + Sync;
+mod inserts;
+
+use inserts::Inserts;
 
 enum Command {
     Spawn,
     Despawn(Target),
-    Insert(Target, Box<Insert>),
+    Insert(Target, usize),
     Remove(Target, fn(&mut World, Entity)),
 }
 
@@ -16,6 +19,7 @@ impl Command {
         self,
         world: &mut World,
         spawned: &mut Vec<Option<Entity>>,
+        inserts: &mut Inserts,
     ) -> Result<(), CommandError> {
         match self {
             Self::Spawn => {
@@ -26,10 +30,37 @@ impl Command {
             Self::Despawn(target) => {
                 world.despawn(target.resolve(spawned)?);
             }
-            Self::Insert(target, insert) => insert(world, target.resolve(spawned)?)?,
+            Self::Insert(target, column) => match target.resolve(spawned) {
+                Ok(entity) => inserts.apply_next(column, world, entity)?,
+                Err(error) => {
+                    inserts.discard_next(column);
+                    return Err(error);
+                }
+            },
             Self::Remove(target, remove) => remove(world, target.resolve(spawned)?),
         }
         Ok(())
+    }
+}
+
+struct PendingCommands<'batch> {
+    commands: Drain<'batch, Command>,
+    inserts: &'batch mut Inserts,
+}
+
+impl PendingCommands<'_> {
+    fn discard(&mut self) {
+        for command in self.commands.by_ref() {
+            if let Command::Insert(_, column) = command {
+                self.inserts.discard_next(column);
+            }
+        }
+    }
+}
+
+impl Drop for PendingCommands<'_> {
+    fn drop(&mut self) {
+        self.discard();
     }
 }
 
@@ -164,8 +195,20 @@ impl FlushReport {
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: Vec<Command>,
+    inserts: Inserts,
     batch: Option<Arc<()>>,
     spawn_count: usize,
+}
+
+impl Drop for CommandBuffer {
+    fn drop(&mut self) {
+        // The guard resumes with the next command if a payload destructor unwinds.
+        PendingCommands {
+            commands: self.commands.drain(..),
+            inserts: &mut self.inserts,
+        }
+        .discard();
+    }
 }
 
 /// A system's queue for submitting deferred structural changes.
@@ -246,10 +289,10 @@ impl CommandBuffer {
         component: T,
     ) {
         let target = self.target(entity.into());
-        self.commands.push(Command::Insert(
-            target,
-            Box::new(move |world, entity| world.insert(entity, component).map(drop)),
-        ));
+        // Make room for the header before its payload belongs to the queue.
+        self.commands.reserve(1);
+        let column = self.inserts.push(component);
+        self.commands.push(Command::Insert(target, column));
     }
 
     /// Queues removal of a component, if it is present at flush time.
@@ -275,8 +318,12 @@ impl CommandBuffer {
             spawned: Vec::with_capacity(std::mem::take(&mut self.spawn_count)),
             failures: Vec::new(),
         };
-        for (index, command) in self.commands.drain(..).enumerate() {
-            if let Err(error) = command.apply(world, &mut report.spawned) {
+        let mut pending = PendingCommands {
+            commands: self.commands.drain(..),
+            inserts: &mut self.inserts,
+        };
+        for (index, command) in pending.commands.by_ref().enumerate() {
+            if let Err(error) = command.apply(world, &mut report.spawned, pending.inserts) {
                 report.failures.push(CommandFailure { index, error });
             }
         }
