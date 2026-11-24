@@ -4,7 +4,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use criterion::{Bencher, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use mythraan_ecs::prelude::{Entity, EntityAllocator, SparseSet, World};
+use mythraan_ecs::prelude::{CommandBuffer, Entity, EntityAllocator, SparseSet, World};
 use mythraan_math::rng::Rng;
 
 const DENSE_ROWS: usize = 2_048;
@@ -250,15 +250,41 @@ impl DespawnFixture {
     }
 }
 
-fn measure_despawn(bencher: &mut Bencher<'_>, mut fixture: DespawnFixture) {
+#[derive(Clone, Copy)]
+enum Despawn {
+    Direct,
+    Flush,
+}
+
+impl Despawn {
+    fn cases() -> [(&'static str, Self); 2] {
+        [("direct", Self::Direct), ("flush", Self::Flush)]
+    }
+}
+
+fn measure_despawn(bencher: &mut Bencher<'_>, mut fixture: DespawnFixture, path: Despawn) {
+    let mut queue = CommandBuffer::new();
     bencher.iter_custom(|iterations| {
         let mut measured = Duration::ZERO;
         for _ in 0..iterations {
-            let start = Instant::now();
-            for &target in &fixture.shuffled {
-                black_box(fixture.world.despawn(target));
+            match path {
+                Despawn::Direct => {
+                    let start = Instant::now();
+                    for &target in &fixture.shuffled {
+                        black_box(fixture.world.despawn(target));
+                    }
+                    measured += start.elapsed();
+                }
+                Despawn::Flush => {
+                    for &target in &fixture.shuffled {
+                        queue.despawn(target);
+                    }
+                    let start = Instant::now();
+                    let report = black_box(queue.flush(&mut fixture.world));
+                    measured += start.elapsed();
+                    assert!(report.failures().is_empty());
+                }
             }
-            measured += start.elapsed();
             fixture.restore();
         }
         measured
@@ -280,17 +306,28 @@ fn despawn_components(c: &mut Criterion) {
 fn despawn_axis<const N: usize>(
     c: &mut Criterion,
     name: &str,
-    counts: [usize; N],
+    mut counts: [usize; N],
     dimensions: impl Fn(usize) -> (usize, usize),
 ) {
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(DESPAWNS as u64));
-    for (name, extra) in Extra::cases() {
-        for count in counts {
-            let (storages, components) = dimensions(count);
-            group.bench_function(BenchmarkId::new(name, count), |bencher| {
-                measure_despawn(bencher, DespawnFixture::new(storages, components, extra));
-            });
+    let mut paths = Despawn::cases();
+    let mut extras = Extra::cases();
+    if std::env::var_os("MYTHRAAN_DESPAWN_REVERSE").is_some() {
+        counts.reverse();
+        paths.reverse();
+        extras.reverse();
+    }
+    for (path_name, path) in paths {
+        for (extra_name, extra) in extras {
+            for count in counts {
+                let (storages, components) = dimensions(count);
+                let id = BenchmarkId::new(format!("{path_name}_{extra_name}"), count);
+                group.bench_function(id, |bencher| {
+                    let fixture = DespawnFixture::new(storages, components, extra);
+                    measure_despawn(bencher, fixture, path);
+                });
+            }
         }
     }
     group.finish();
