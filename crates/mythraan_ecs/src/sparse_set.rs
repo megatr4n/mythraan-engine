@@ -101,7 +101,8 @@ impl<T> SparseSet<T> {
 
     /// Inserts a component and returns the old value if the same entity owned one.
     ///
-    /// Growing the sparse table initializes all intervening entries.
+    /// Growing the sparse table initializes all intervening entries. The first
+    /// sparse allocation uses the standard allocation failure handler.
     ///
     /// # Errors
     ///
@@ -139,15 +140,20 @@ impl<T> SparseSet<T> {
             .ok_or(SparseSetError::IndexOutOfRange { index })?;
         let position = u32::try_from(self.entities.len())
             .map_err(|_| SparseSetError::IndexOutOfRange { index })?;
-        self.sparse
-            .try_reserve(required.saturating_sub(self.sparse.len()))?;
         self.entities.try_reserve(1)?;
         self.values.try_reserve(1)?;
         if let Some(ticks) = &mut self.ticks {
             ticks.try_reserve(1)?;
         }
         if required > self.sparse.len() {
-            self.sparse.resize(required, None);
+            if self.sparse.is_empty() && required <= isize::MAX as usize / size_of::<SparseSlot>() {
+                // Repeating the zero niche lets Vec request zeroed memory.
+                // Start with room for at least four slots, matching Vec growth.
+                self.sparse = vec![None; required.max(4)];
+            } else {
+                self.sparse.try_reserve(required - self.sparse.len())?;
+                self.sparse.resize(required, None);
+            }
         }
         let entry = self
             .sparse
