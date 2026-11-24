@@ -1,5 +1,7 @@
 //! Reused deferred queues checked over many generations of the same slots.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use mythraan_ecs::prelude::{CommandBuffer, World};
 use mythraan_ecs::{CommandError, WorldInsertError};
 
@@ -70,4 +72,57 @@ fn repeated_flushes_isolate_placeholders_and_recycle_generations() {
         assert!(queue.flush(&mut world).failures().is_empty());
         previous = pairs.pop().map(|(_, latest)| latest);
     }
+}
+
+#[test]
+fn reused_batches_preserve_alignment_and_drop_zero_sized_payloads_once() {
+    #[repr(align(256))]
+    struct Aligned(usize);
+
+    #[repr(align(64))]
+    struct Marker;
+
+    static MARKER_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    impl Drop for Marker {
+        fn drop(&mut self) {
+            MARKER_DROPS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let mut world = World::new();
+    let mut queue = CommandBuffer::new();
+    let targets: Vec<_> = (0..WIDTH).map(|_| world.spawn().unwrap()).collect();
+    let mut marker_drops = 0;
+
+    for batch in 0..BATCHES {
+        let count = if batch % 2 == 0 { WIDTH } else { WIDTH / 2 };
+        for (slot, &entity) in targets[..count].iter().enumerate() {
+            queue.insert(entity, Aligned(batch * WIDTH + slot));
+            queue.insert(entity, Marker);
+            queue.insert(entity, slot as u8);
+        }
+        assert!(queue.flush(&mut world).failures().is_empty());
+        assert_eq!(MARKER_DROPS.load(Ordering::Relaxed), marker_drops);
+
+        for (slot, &entity) in targets[..count].iter().enumerate() {
+            let aligned = world.get::<Aligned>(entity).unwrap();
+            assert!(std::ptr::from_ref(aligned).is_aligned());
+            assert_eq!(aligned.0, batch * WIDTH + slot);
+            assert_eq!(world.get::<u8>(entity), Some(&(slot as u8)));
+            assert!(std::ptr::from_ref(world.get::<Marker>(entity).unwrap()).is_aligned());
+
+            queue.remove::<Aligned>(entity);
+            queue.remove::<Marker>(entity);
+            queue.remove::<u8>(entity);
+        }
+        assert!(queue.flush(&mut world).failures().is_empty());
+        marker_drops += count;
+        assert_eq!(MARKER_DROPS.load(Ordering::Relaxed), marker_drops);
+        assert_eq!(world.query::<&Aligned>().count(), 0);
+    }
+
+    queue.insert(targets[0], Marker);
+    drop(queue);
+    assert_eq!(MARKER_DROPS.load(Ordering::Relaxed), marker_drops + 1);
 }
