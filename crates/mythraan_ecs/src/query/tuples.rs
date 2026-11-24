@@ -4,30 +4,25 @@ use super::sealed::Fetch;
 use crate::{Entity, SparseSet, SystemAccess, World};
 
 macro_rules! read_tuple {
-    ($first:ident => $leading:ident $(, $component:ident => $storage:ident)* $(,)?) => {
-        impl<$first: Send + Sync + 'static $(, $component: Send + Sync + 'static)*>
-            Fetch for (&$first, $(&$component,)*)
-        {
-            type Item<'world> = (&'world $first, $(&'world $component,)*);
+    ($($component:ident => $storage:ident @ $index:literal),+ $(,)?) => {
+        impl<$($component: Send + Sync + 'static),+> Fetch for ($(&$component,)+) {
+            type Item<'world> = ($(&'world $component,)+);
             type State<'world> = (
-                (&'world SparseSet<$first>, $(&'world SparseSet<$component>,)*),
+                ($(&'world SparseSet<$component>,)+),
                 &'world [Entity],
-                bool,
+                usize,
             );
 
             fn record_reads(access: &mut SystemAccess) {
-                access.read_component(TypeId::of::<$first>());
-                $(access.read_component(TypeId::of::<$component>());)*
+                $(access.read_component(TypeId::of::<$component>());)+
             }
 
             fn prepare(world: &World) -> Option<Self::State<'_>> {
-                let $leading = world.storage::<$first>()?;
-                $(let $storage = world.storage::<$component>()?;)*
-                let (driver, candidates) = [$leading.entities(), $($storage.entities(),)*]
+                $(let $storage = world.storage::<$component>()?;)+
+                let (driver, candidates) = [$(($index, $storage.entities()),)+]
                     .into_iter()
-                    .enumerate()
                     .min_by_key(|(_, entities)| entities.len())?;
-                Some((($leading, $($storage,)*), candidates, driver == 0))
+                Some((($($storage,)+), candidates, driver))
             }
 
             fn len(state: &Self::State<'_>) -> usize {
@@ -39,19 +34,19 @@ macro_rules! read_tuple {
                 position: usize,
             ) -> Option<(Entity, Self::Item<'world>)> {
                 let entity = *state.1.get(position)?;
-                let ($leading, $($storage,)*) = state.0;
-                let first = if state.2 {
-                    $leading.values().get(position)?
+                let ($($storage,)+) = state.0;
+                $(let $storage = if state.2 == $index {
+                    $storage.values().get(position)?
                 } else {
-                    $leading.get(entity)?
-                };
-                Some((entity, (first, $($storage.get(entity)?,)*)))
+                    $storage.get(entity)?
+                };)+
+                Some((entity, ($($storage,)+)))
             }
         }
     };
 }
 
-read_tuple!(A => a);
-read_tuple!(A => a, B => b);
-read_tuple!(A => a, B => b, C => c);
-read_tuple!(A => a, B => b, C => c, D => d);
+read_tuple!(A => a @ 0);
+read_tuple!(A => a @ 0, B => b @ 1);
+read_tuple!(A => a @ 0, B => b @ 1, C => c @ 2);
+read_tuple!(A => a @ 0, B => b @ 1, C => c @ 2, D => d @ 3);
