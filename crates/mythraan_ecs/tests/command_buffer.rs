@@ -1,7 +1,7 @@
 //! Deferred structural changes through the public ECS API.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mythraan_ecs::prelude::{CommandBuffer, World};
 use mythraan_ecs::{CommandError, WorldInsertError};
@@ -272,4 +272,118 @@ fn unwinding_discards_pending_commands_and_leaves_the_buffer_reusable() {
     assert_eq!(report.resolve(&interrupted), None);
     assert!(report.resolve(&next).is_some());
     assert_eq!(world.get::<u32>(entity), None);
+}
+
+#[derive(Clone)]
+struct DropLog(Arc<Mutex<Vec<&'static str>>>);
+
+impl DropLog {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(Vec::new())))
+    }
+
+    fn component(&self, name: &'static str, panics: bool) -> RecordedDrop {
+        RecordedDrop {
+            log: self.clone(),
+            name,
+            panics,
+        }
+    }
+
+    fn expect(&self, names: &[&str]) {
+        assert_eq!(self.0.lock().unwrap().as_slice(), names);
+    }
+}
+
+struct RecordedDrop {
+    log: DropLog,
+    name: &'static str,
+    panics: bool,
+}
+
+impl Drop for RecordedDrop {
+    fn drop(&mut self) {
+        self.log.0.lock().unwrap().push(self.name);
+        assert!(!self.panics, "intentional panic in component destructor");
+    }
+}
+
+struct OtherDrop {
+    _component: RecordedDrop,
+}
+
+#[test]
+fn failed_and_replaced_payloads_drop_at_their_command_positions() {
+    let log = DropLog::new();
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    let mut commands = CommandBuffer::new();
+    let foreign = CommandBuffer::new().spawn();
+    world.insert(entity, log.component("old", false)).unwrap();
+
+    commands.insert(&foreign, log.component("rejected", false));
+    commands.insert(entity, log.component("replacement", false));
+    let report = commands.flush(&mut world);
+    assert_eq!(report.failures().len(), 1);
+    assert_eq!(report.failures()[0].index, 0);
+    assert!(matches!(
+        report.failures()[0].error,
+        CommandError::ForeignPlaceholder
+    ));
+    log.expect(&["rejected", "old"]);
+
+    drop(world.remove::<RecordedDrop>(entity));
+    drop(commands);
+    log.expect(&["rejected", "old", "replacement"]);
+}
+
+#[test]
+fn a_panicking_replacement_drops_remaining_payloads_once_in_order() {
+    let log = DropLog::new();
+    let mut world = World::new();
+    let entity = world.spawn().unwrap();
+    world.insert(entity, log.component("old", true)).unwrap();
+    let mut commands = CommandBuffer::new();
+    commands.insert(entity, log.component("kept", false));
+    let pending = commands.spawn();
+    commands.insert(
+        &pending,
+        OtherDrop {
+            _component: log.component("discarded other", false),
+        },
+    );
+    commands.insert(&pending, log.component("discarded same", false));
+
+    let result = catch_unwind(AssertUnwindSafe(|| commands.flush(&mut world)));
+    assert!(result.is_err());
+    log.expect(&["old", "discarded other", "discarded same"]);
+    assert_eq!(world.get::<RecordedDrop>(entity).unwrap().name, "kept");
+
+    let retry = commands.spawn();
+    commands.insert(&retry, log.component("retry", false));
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    assert_eq!(report.resolve(&pending), None);
+    let retry = report.resolve(&retry).unwrap();
+    drop(world.remove::<RecordedDrop>(retry));
+    drop(world.remove::<RecordedDrop>(entity));
+    log.expect(&["old", "discarded other", "discarded same", "retry", "kept"]);
+}
+
+#[test]
+fn dropping_a_buffer_finishes_discarding_after_a_payload_panics() {
+    let log = DropLog::new();
+    let mut commands = CommandBuffer::new();
+    let entity = commands.spawn();
+    commands.insert(&entity, log.component("panic", true));
+    commands.insert(
+        &entity,
+        OtherDrop {
+            _component: log.component("after other", false),
+        },
+    );
+    commands.insert(&entity, log.component("after same", false));
+
+    assert!(catch_unwind(AssertUnwindSafe(|| drop(commands))).is_err());
+    log.expect(&["panic", "after other", "after same"]);
 }
