@@ -72,14 +72,15 @@ struct Scene {
 
 impl Scene {
     fn new(types: usize) -> Self {
-        assert!((32..=50).contains(&types));
+        assert!((4..=TYPES.len()).contains(&types));
         let mut world = World::new();
         let mut rng = Rng::from_seed(SEED);
         let mut histogram = vec![0; types];
         let rows = (0..ROWS)
             .map(|row| {
                 let entity = world.spawn().unwrap();
-                let len = 3 + rng.range_u32(0..3).unwrap() as usize;
+                // The two movement classes are mutually exclusive.
+                let len = (3 + rng.range_u32(0..3).unwrap() as usize).min(types - 1);
                 let mut ids = [0, if row % 4 == 0 { 2 } else { 1 }, 0, 0, 0];
                 for slot in 2..len {
                     loop {
@@ -159,9 +160,7 @@ impl Scene {
         }
         let insert = start.elapsed();
         let start = Instant::now();
-        for &i in selected {
-            assert!(self.world.despawn(self.rows[i].entity));
-        }
+        despawn_rows(&mut self.world, &self.rows, selected);
         let despawn = start.elapsed();
         for &i in selected.iter().rev() {
             let row = &mut self.rows[i];
@@ -172,6 +171,13 @@ impl Scene {
         }
         self.cursor = (self.cursor + n) % ROWS;
         [despawn, insert, remove].map(|duration| duration.as_secs_f64() * 1e9 / n as f64)
+    }
+}
+
+#[inline(never)]
+fn despawn_rows(world: &mut World, rows: &[Row], selected: &[usize]) {
+    for &i in selected {
+        assert!(world.despawn(rows[i].entity));
     }
 }
 
@@ -231,16 +237,26 @@ fn main() {
         .collect();
     match args.as_slice() {
         [mode, types] if mode == "profile" => profile(types.parse().unwrap()),
+        [mode, types] if mode == "profile-scene" => {
+            let mut scene = Scene::new(types.parse().unwrap());
+            let n = ROWS / 10;
+            for _ in 0..10 {
+                black_box(scene.frame(n));
+            }
+            black_box(scene.costs(n));
+        }
         [mode, types, percent] if mode == "sample" => {
             sample(types.parse().unwrap(), percent.parse().unwrap())
         }
         [] => {
-            for types in [32, 50] {
+            for types in [4, 8, 16, 32, 50] {
                 for percent in [1, 10] {
                     sample(types, percent);
                 }
             }
         }
-        _ => panic!("usage: membership [sample <types> <percent> | profile <types>]"),
+        _ => panic!(
+            "usage: membership [sample <types> <percent> | profile <types> | profile-scene <types>]"
+        ),
     }
 }
