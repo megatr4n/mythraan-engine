@@ -125,6 +125,31 @@ fn changed_filter_can_read_the_stamp_of_a_writable_component() {
 }
 
 #[test]
+fn dense_writes_keep_ticks_aligned_with_values_after_deferred_despawn() {
+    let mut world = World::new();
+    let [blocked, removed, survivor] = [(); 3].map(|()| world.spawn().unwrap());
+    for (entity, value) in [(blocked, 10_u32), (removed, 20), (survivor, 30)] {
+        world.insert(entity, value).unwrap();
+    }
+    world.insert(blocked, true).unwrap();
+    let mut commands = CommandBuffer::new();
+    commands.despawn(removed);
+    assert!(commands.flush(&mut world).failures().is_empty());
+    world.advance_change_tick().unwrap();
+
+    world
+        .query_filtered_mut::<&mut u32, Without<bool>>()
+        .unwrap()
+        .for_each(|entity, value| {
+            assert_eq!(entity, survivor);
+            *value += 1;
+        });
+    assert_eq!(world.get::<u32>(blocked), Some(&10));
+    assert_eq!(world.get::<u32>(survivor), Some(&31));
+    assert_eq!(changed(&mut world), [survivor]);
+}
+
+#[test]
 fn missing_tuple_component_does_not_mark_unvisited_rows() {
     let mut world = World::new();
     let matched = world.spawn().unwrap();

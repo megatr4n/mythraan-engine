@@ -11,6 +11,15 @@ pub trait Fetch {
     fn requests() -> Requests;
     fn prepare<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>>;
     fn get<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>>;
+
+    fn visit_dense(
+        _state: &mut Self::State<'_>,
+        _source: &[Entity],
+        _matches: &mut impl FnMut(Entity) -> bool,
+        _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        false
+    }
 }
 
 pub trait Field {
@@ -22,6 +31,15 @@ pub trait Field {
         state: &'row mut Self::State<'_>,
         entity: Entity,
     ) -> Option<RowItem<'row, Self::Item<'row>>>;
+
+    fn visit_dense(
+        _state: &mut Self::State<'_>,
+        _source: &[Entity],
+        _matches: &mut impl FnMut(Entity) -> bool,
+        _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        false
+    }
 }
 
 pub struct RowItem<'row, T> {
@@ -127,6 +145,35 @@ impl<T: Send + Sync + 'static> Field for &mut T {
             stamp: state.ticks.get(position).map(|ticks| (ticks, state.tick)),
         })
     }
+
+    fn visit_dense(
+        state: &mut Self::State<'_>,
+        source: &[Entity],
+        matches: &mut impl FnMut(Entity) -> bool,
+        visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        // The selected driver must share this column's dense row order.
+        if !std::ptr::eq(source, state.index.entities())
+            || source.len() != state.values.len()
+            || source.len() != state.ticks.len()
+        {
+            return false;
+        }
+
+        let tick = state.tick;
+        for ((entity, value), stamp) in source
+            .iter()
+            .copied()
+            .zip(&mut *state.values)
+            .zip(state.ticks)
+        {
+            if matches(entity) {
+                stamp.mark_changed(tick);
+                visit(entity, value);
+            }
+        }
+        true
+    }
 }
 
 impl<T: Field> Fetch for T {
@@ -140,6 +187,15 @@ impl<T: Field> Fetch for T {
     }
     fn get<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>> {
         Some(T::item(state, entity)?.into_item())
+    }
+
+    fn visit_dense(
+        state: &mut Self::State<'_>,
+        source: &[Entity],
+        matches: &mut impl FnMut(Entity) -> bool,
+        visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        T::visit_dense(state, source, matches, visit)
     }
 }
 

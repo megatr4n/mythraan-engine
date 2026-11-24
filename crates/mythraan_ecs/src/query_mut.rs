@@ -249,11 +249,20 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             .rposition(Option::is_some)
             .map_or(0, |last| last + 1);
         let filters = self.filters.get(..end).unwrap_or_default();
-        let visit_entity = |entity| {
-            if filters
+        let mut matches = |entity| {
+            filters
                 .iter()
                 .flatten()
                 .all(|filter| filter.matches(entity, self.after_tick))
+        };
+        if let Some(source) = self.candidates
+            && Q::visit_dense(state, source, &mut matches, &mut visit)
+        {
+            return;
+        }
+
+        let visit_entity = |entity| {
+            if matches(entity)
                 && let Some(item) = Q::get(state, entity)
             {
                 visit(entity, item);
