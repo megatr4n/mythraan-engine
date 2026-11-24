@@ -23,3 +23,7 @@ criterion.workspace = true
 [[bench]]
 name = "sparse_set"
 harness = false
+
+[[bench]]
+name = "world"
+harness = false
