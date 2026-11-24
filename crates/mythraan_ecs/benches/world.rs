@@ -3,14 +3,16 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{
+    BatchSize, BenchmarkGroup, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main,
+    measurement::WallTime,
+};
 use mythraan_ecs::prelude::{
     CommandBuffer, DeferredEntity, Entity, Schedule, SystemAccess, With, Without, World,
 };
 
 const ENTITY_COUNT: u64 = 100_000;
 const COMMAND_ENTITIES: u64 = 1_024;
-const CHURN_PERIOD: usize = 10;
 
 struct Position(u64);
 struct Velocity(u64);
@@ -132,7 +134,7 @@ fn query_setup(c: &mut Criterion) {
     group.finish();
 }
 
-struct ChurnFrame {
+struct ChurnFrame<const PERIOD: usize> {
     world: World,
     live: Vec<Entity>,
     commands: CommandBuffer,
@@ -140,7 +142,7 @@ struct ChurnFrame {
     phase: usize,
 }
 
-impl ChurnFrame {
+impl<const PERIOD: usize> ChurnFrame<PERIOD> {
     fn new() -> Self {
         let world = populated_world(true);
         let live = world
@@ -151,11 +153,11 @@ impl ChurnFrame {
             world,
             live,
             commands: CommandBuffer::new(),
-            replacements: Vec::with_capacity(ENTITY_COUNT as usize / CHURN_PERIOD),
+            replacements: Vec::with_capacity(ENTITY_COUNT as usize / PERIOD),
             phase: 0,
         };
         let retired = frame.live[0];
-        for _ in 0..CHURN_PERIOD {
+        for _ in 0..PERIOD {
             frame.advance();
         }
         assert!(!frame.world.is_alive(retired));
@@ -174,8 +176,8 @@ impl ChurnFrame {
         self.world.advance_change_tick().unwrap();
         let phase = self.phase;
         // Stagger the selection in pairs of groups to preserve the tag mix in every frame.
-        let selected = (0..self.live.len() / CHURN_PERIOD)
-            .map(move |group| group * CHURN_PERIOD + (phase + group / 2) % CHURN_PERIOD);
+        let selected = (0..self.live.len() / PERIOD)
+            .map(move |group| group * PERIOD + (phase + group / 2) % PERIOD);
         for index in selected.clone() {
             self.commands.despawn(self.live[index]);
         }
@@ -200,15 +202,25 @@ impl ChurnFrame {
         for (index, entity) in selected.zip(self.replacements.drain(..)) {
             self.live[index] = report.resolve(&entity).unwrap();
         }
-        self.phase = (self.phase + 1) % CHURN_PERIOD;
+        self.phase = (self.phase + 1) % PERIOD;
     }
 }
 
 fn frames_with_churn(c: &mut Criterion) {
     let mut group = c.benchmark_group("world_frame");
     group.throughput(Throughput::Elements(ENTITY_COUNT));
-    let mut frame = ChurnFrame::new();
-    group.bench_function("read_after_churn", |b| {
+    bench_churn::<10>(&mut group, "read_after_churn", "churn_and_read");
+    bench_churn::<100>(&mut group, "read_after_churn_1pct", "churn_and_read_1pct");
+    group.finish();
+}
+
+fn bench_churn<const PERIOD: usize>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    read_case: &str,
+    frame_case: &str,
+) {
+    let mut frame = ChurnFrame::<PERIOD>::new();
+    group.bench_function(read_case, |b| {
         b.iter_custom(|iterations| {
             let mut elapsed = Duration::ZERO;
             for _ in 0..iterations {
@@ -220,14 +232,13 @@ fn frames_with_churn(c: &mut Criterion) {
             elapsed
         });
     });
-    let mut frame = ChurnFrame::new();
-    group.bench_function("churn_and_read", |b| {
+    let mut frame = ChurnFrame::<PERIOD>::new();
+    group.bench_function(frame_case, |b| {
         b.iter(|| {
             frame.advance();
             black_box(read_position_and_velocity(black_box(&frame.world)));
         });
     });
-    group.finish();
 }
 
 fn queued_lifecycle() -> CommandBuffer {
