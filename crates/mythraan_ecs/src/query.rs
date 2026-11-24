@@ -6,6 +6,8 @@ use crate::{Entity, SystemAccess, World};
 mod tuples;
 
 mod sealed {
+    use std::ops::Range;
+
     use crate::{Entity, SystemAccess, World};
 
     pub trait Fetch {
@@ -19,6 +21,17 @@ mod sealed {
             state: &Self::State<'world>,
             position: usize,
         ) -> Option<(Entity, Self::Item<'world>)>;
+
+        fn fold<'world, B>(
+            state: &Self::State<'world>,
+            candidates: Range<usize>,
+            init: B,
+            visit: impl FnMut(B, (Entity, Self::Item<'world>)) -> B,
+        ) -> B {
+            candidates
+                .filter_map(|position| Self::row(state, position))
+                .fold(init, visit)
+        }
     }
 }
 
@@ -88,6 +101,16 @@ impl<'world, Q: ReadQuery> Iterator for Query<'world, Q> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, Some(self.candidates.len()))
+    }
+
+    fn fold<B, F>(self, init: B, visit: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        let Some(state) = self.state.as_ref() else {
+            return init;
+        };
+        Q::fold(state, self.candidates, init, visit)
     }
 }
 

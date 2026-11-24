@@ -224,6 +224,18 @@ fn assert_sparse_join(world: &World, handles: &[Entity]) {
             actual.sort_unstable_by_key(|&(entity, _)| key(entity));
             assert_eq!(actual, expected);
             assert_eq!(query.size_hint(), (0, Some(0)));
+
+            let mut remaining = world.query::<($(&Sample<$id>,)+)>();
+            let project = |(entity, ($($value,)+)): (Entity, ($(&Sample<$id>,)+))| {
+                (entity, ($($value.0,)+))
+            };
+            let head: Vec<_> = remaining.next().map(project).into_iter().collect();
+            let mut folded = remaining.fold(head, |mut rows, entry| {
+                rows.push(project(entry));
+                rows
+            });
+            folded.sort_unstable_by_key(|&(entity, _)| key(entity));
+            assert_eq!(folded, expected);
         }};
     }
 
