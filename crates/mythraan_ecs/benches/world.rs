@@ -8,7 +8,7 @@ use criterion::{
     measurement::WallTime,
 };
 use mythraan_ecs::prelude::{
-    CommandBuffer, DeferredEntity, Entity, Schedule, SystemAccess, With, Without, World,
+    CommandBuffer, DeferredEntity, Entity, Schedule, SparseSet, SystemAccess, With, Without, World,
 };
 
 const ENTITY_COUNT: u64 = 100_000;
@@ -112,6 +112,46 @@ fn queries(c: &mut Criterion) {
     group.throughput(Throughput::Elements(ENTITY_COUNT));
     group.bench_function("read_position_and_velocity_aligned", |b| {
         b.iter(|| black_box(read_position_and_velocity(black_box(&aligned))));
+    });
+    group.finish();
+}
+
+fn mover_stages(c: &mut Criterion) {
+    let mut world = populated_world(true);
+    let mut enabled = Vec::new();
+    world
+        .query_filtered_mut::<&mut Moving, Without<Disabled>>()
+        .unwrap()
+        .for_each(|entity, _| enabled.push(entity));
+    assert_eq!(enabled.len(), ENTITY_COUNT as usize / 4);
+
+    let mut positions = SparseSet::new();
+    for (entity, position) in world.query::<&Position>() {
+        positions.insert(entity, Position(position.0)).unwrap();
+    }
+
+    let mut group = c.benchmark_group("mover_stages");
+    group.throughput(Throughput::Elements(ENTITY_COUNT / 2));
+    group.bench_function("without_disabled", |b| {
+        b.iter(|| {
+            black_box(&mut world)
+                .query_filtered_mut::<&mut Moving, Without<Disabled>>()
+                .unwrap()
+                .for_each(|entity, _| {
+                    black_box(entity);
+                });
+        });
+    });
+    group.throughput(Throughput::Elements(enabled.len() as u64));
+    group.bench_function("position_lookup", |b| {
+        b.iter(|| {
+            let positions = black_box(&positions);
+            let sum = black_box(&enabled)
+                .iter()
+                .filter_map(|&entity| positions.get(entity))
+                .fold(0_u64, |sum, position| sum.wrapping_add(position.0));
+            black_box(sum)
+        });
     });
     group.finish();
 }
@@ -300,7 +340,7 @@ criterion_group! {
         .sample_size(40)
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3));
-    targets = queries, query_setup, frames_with_churn, deferred_lifecycle, cached_schedule
+    targets = queries, mover_stages, query_setup, frames_with_churn, deferred_lifecycle, cached_schedule
 }
 
 criterion_main!(benches);
