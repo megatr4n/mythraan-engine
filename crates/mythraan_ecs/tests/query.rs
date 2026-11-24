@@ -1,6 +1,8 @@
 //! Read-only query behavior through the public ECS API.
 
-use mythraan_ecs::prelude::{CommandBuffer, Entity, Query, World};
+use std::num::NonZeroUsize;
+
+use mythraan_ecs::prelude::{CommandBuffer, Entity, Query, With, Without, World};
 use proptest::prelude::*;
 use proptest::test_runner::RngSeed;
 
@@ -205,7 +207,47 @@ fn triple_query_checks_every_required_component() {
 
 struct Sample<const ID: usize>(u32);
 
-fn populate_column<const ID: usize>(world: &mut World, rows: &[(Entity, u8, u16)]) {
+// The old representation resolves a one-based sparse position and compares
+// the full dense entity to reject stale handles.
+#[derive(Default)]
+struct LegacyColumn {
+    sparse: Vec<Option<NonZeroUsize>>,
+    dense: Vec<(Entity, u32)>,
+}
+
+impl LegacyColumn {
+    fn position(&self, entity: Entity) -> Option<usize> {
+        let position = self.sparse.get(entity.index() as usize)?.as_ref()?.get() - 1;
+        (self.dense.get(position)?.0 == entity).then_some(position)
+    }
+
+    fn get(&self, entity: Entity) -> Option<u32> {
+        Some(self.dense[self.position(entity)?].1)
+    }
+
+    fn insert(&mut self, entity: Entity, value: u32) {
+        let index = entity.index() as usize;
+        if index >= self.sparse.len() {
+            self.sparse.resize(index + 1, None);
+        }
+        assert!(self.sparse[index].is_none());
+        self.sparse[index] = NonZeroUsize::new(self.dense.len() + 1);
+        self.dense.push((entity, value));
+    }
+
+    fn despawn(&mut self, entity: Entity) {
+        if let Some(position) = self.position(entity) {
+            self.sparse[entity.index() as usize] = None;
+            self.dense.swap_remove(position);
+            if let Some(&(moved, _)) = self.dense.get(position) {
+                self.sparse[moved.index() as usize] = NonZeroUsize::new(position + 1);
+            }
+        }
+    }
+}
+
+fn populate_column<const ID: usize>(world: &mut World, rows: &[(Entity, u8, u16)]) -> LegacyColumn {
+    let mut legacy = LegacyColumn::default();
     for offset in 0..rows.len() {
         let index = if ID.is_multiple_of(2) {
             offset
@@ -216,21 +258,20 @@ fn populate_column<const ID: usize>(world: &mut World, rows: &[(Entity, u8, u16)
         if mask & (1 << ID) != 0 {
             let value = u32::from(sample) * 4 + ID as u32;
             world.insert(entity, Sample::<ID>(value)).unwrap();
+            legacy.insert(entity, value);
         }
     }
+    legacy
 }
 
-fn assert_sparse_join(world: &World, handles: &[Entity]) {
-    let rare_rows = handles
-        .iter()
-        .filter(|&&entity| world.get::<Sample<0>>(entity).is_some())
-        .count();
+fn assert_sparse_join(world: &mut World, handles: &[Entity], legacy: &[LegacyColumn; 4]) {
+    let rare_rows = legacy[0].dense.len();
+    let key = |entity: Entity| (entity.index(), entity.generation());
 
     macro_rules! assert_join {
         ($($id:literal => $value:ident),+ $(,)?) => {{
-            let key = |entity: Entity| (entity.index(), entity.generation());
             let mut expected: Vec<_> = handles.iter().filter_map(|&entity| {
-                Some((entity, ($(world.get::<Sample<$id>>(entity)?.0,)+)))
+                Some((entity, ($(legacy[$id].get(entity)?,)+)))
             }).collect();
             expected.sort_unstable_by_key(|&(entity, _)| key(entity));
 
@@ -264,6 +305,25 @@ fn assert_sparse_join(world: &World, handles: &[Entity]) {
     assert_join!(1 => b, 0 => a, 2 => c, 3 => d);
     assert_join!(1 => b, 2 => c, 0 => a, 3 => d);
     assert_join!(1 => b, 2 => c, 3 => d, 0 => a);
+
+    let mut expected: Vec<_> = handles
+        .iter()
+        .filter_map(|&entity| {
+            if legacy[0].get(entity).is_some() {
+                return None;
+            }
+            legacy[3].get(entity)?;
+            Some((entity, legacy[1].get(entity)?))
+        })
+        .collect();
+    let mut filtered = Vec::new();
+    world
+        .query_filtered_mut::<&Sample<1>, (With<Sample<3>>, Without<Sample<0>>)>()
+        .unwrap()
+        .for_each(|entity, sample| filtered.push((entity, sample.0)));
+    expected.sort_unstable_by_key(|&(entity, _)| key(entity));
+    filtered.sort_unstable_by_key(|&(entity, _)| key(entity));
+    assert_eq!(filtered, expected);
 }
 
 proptest! {
@@ -275,7 +335,7 @@ proptest! {
     })]
 
     #[test]
-    fn tuple_queries_match_direct_reads_across_deferred_despawns(
+    fn queries_match_legacy_columns_across_deferred_despawns(
         random in prop::collection::vec(
             (any::<u8>(), any::<u16>(), any::<bool>()),
             0..=if cfg!(miri) { 12 } else { 96 },
@@ -297,10 +357,12 @@ proptest! {
             }
         }
 
-        populate_column::<0>(&mut world, &rows);
-        populate_column::<1>(&mut world, &rows);
-        populate_column::<2>(&mut world, &rows);
-        populate_column::<3>(&mut world, &rows);
+        let mut legacy = [
+            populate_column::<0>(&mut world, &rows),
+            populate_column::<1>(&mut world, &rows),
+            populate_column::<2>(&mut world, &rows),
+            populate_column::<3>(&mut world, &rows),
+        ];
         let mut handles: Vec<_> = rows.iter().map(|&(entity, _, _)| entity).collect();
 
         let mut commands = CommandBuffer::new();
@@ -311,7 +373,7 @@ proptest! {
         commands.insert(&pending, Sample::<1>(111));
         commands.insert(&pending, Sample::<2>(222));
         commands.insert(&pending, Sample::<3>(333));
-        assert_sparse_join(&world, &handles);
+        assert_sparse_join(&mut world, &handles, &legacy);
 
         let report = commands.flush(&mut world);
         assert!(report.failures().is_empty());
@@ -321,6 +383,14 @@ proptest! {
         assert_eq!(reused.index(), previous.index());
         assert_ne!(reused.generation(), previous.generation());
         handles.push(reused);
-        assert_sparse_join(&world, &handles);
+        for column in &mut legacy {
+            for &entity in &dead {
+                column.despawn(entity);
+            }
+        }
+        legacy[1].insert(reused, 111);
+        legacy[2].insert(reused, 222);
+        legacy[3].insert(reused, 333);
+        assert_sparse_join(&mut world, &handles, &legacy);
     }
 }

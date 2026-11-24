@@ -1,12 +1,24 @@
 use std::mem;
-use std::num::NonZeroUsize;
+use std::num::NonZeroU64;
 
 use crate::change_detection::ComponentTicks;
 use crate::{Entity, SparseSetError};
 
+// The low 32 bits store the dense position. The allocator only issues
+// nonzero generations for the high 32 bits, leaving the zero word empty.
+type SparseSlot = Option<NonZeroU64>;
+
+fn pack_slot(position: u32, entity: Entity) -> SparseSlot {
+    NonZeroU64::new((u64::from(entity.generation()) << u32::BITS) | u64::from(position))
+}
+
+fn slot_generation(word: u64) -> u32 {
+    (word >> u32::BITS) as u32
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct SparseIndex<'world> {
-    sparse: &'world [Option<NonZeroUsize>],
+    sparse: &'world [SparseSlot],
     entities: &'world [Entity],
 }
 
@@ -17,8 +29,8 @@ impl<'world> SparseIndex<'world> {
 
     pub(crate) fn position(self, entity: Entity) -> Option<usize> {
         let sparse_index = usize::try_from(entity.index()).ok()?;
-        let index = self.sparse.get(sparse_index)?.as_ref()?.get() - 1;
-        (self.entities.get(index) == Some(&entity)).then_some(index)
+        let word = self.sparse.get(sparse_index)?.as_ref()?.get();
+        (slot_generation(word) == entity.generation()).then_some(word as u32 as usize)
     }
 }
 
@@ -40,8 +52,7 @@ impl<'world> SparseIndex<'world> {
 /// ```
 #[derive(Debug)]
 pub struct SparseSet<T> {
-    // Dense positions are one-based so empty entries fit in one word.
-    sparse: Vec<Option<NonZeroUsize>>,
+    sparse: Vec<SparseSlot>,
     entities: Vec<Entity>,
     values: Vec<T>,
     ticks: Option<Vec<ComponentTicks>>,
@@ -99,9 +110,10 @@ impl<T> SparseSet<T> {
         let index = entity.index();
         let sparse_index =
             usize::try_from(index).map_err(|_| SparseSetError::IndexOutOfRange { index })?;
-        if let Some(position) = self.sparse.get(sparse_index).copied().flatten() {
-            let dense_index = position.get() - 1;
-            if self.entities.get(dense_index) == Some(&entity)
+        if let Some(slot) = self.sparse.get(sparse_index).copied().flatten() {
+            let word = slot.get();
+            let dense_index = word as u32 as usize;
+            if slot_generation(word) == entity.generation()
                 && let Some(previous) = self.values.get_mut(dense_index)
             {
                 if let Some(ticks) = self.ticks.as_ref().and_then(|ticks| ticks.get(dense_index)) {
@@ -115,6 +127,8 @@ impl<T> SparseSet<T> {
         let required = sparse_index
             .checked_add(1)
             .ok_or(SparseSetError::IndexOutOfRange { index })?;
+        let position = u32::try_from(self.entities.len())
+            .map_err(|_| SparseSetError::IndexOutOfRange { index })?;
         self.sparse
             .try_reserve(required.saturating_sub(self.sparse.len()))?;
         self.entities.try_reserve(1)?;
@@ -129,7 +143,7 @@ impl<T> SparseSet<T> {
             .sparse
             .get_mut(sparse_index)
             .ok_or(SparseSetError::IndexOutOfRange { index })?;
-        *entry = NonZeroUsize::new(self.entities.len() + 1);
+        *entry = pack_slot(position, entity);
         self.entities.push(entity);
         self.values.push(value);
         if let Some(ticks) = &mut self.ticks {
@@ -189,7 +203,8 @@ impl<T> SparseSet<T> {
         if let Some(moved) = self.entities.get(index)
             && let Some(entry) = self.sparse.get_mut(moved.index() as usize)
         {
-            *entry = NonZeroUsize::new(index + 1);
+            // The removed position was decoded from the low 32 bits of its slot.
+            *entry = pack_slot(index as u32, *moved);
         }
         Some(value)
     }
@@ -250,5 +265,22 @@ impl<T> SparseSet<T> {
 impl<T> Default for SparseSet<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SparseSlot, pack_slot, slot_generation};
+    use crate::EntityAllocator;
+
+    #[test]
+    fn one_word_encodes_both_dense_position_boundaries() {
+        assert_eq!(size_of::<SparseSlot>(), size_of::<u64>());
+        let entity = EntityAllocator::new().spawn().unwrap();
+        for position in [0, u32::MAX] {
+            let word = pack_slot(position, entity).unwrap().get();
+            assert_eq!(word as u32, position);
+            assert_eq!(slot_generation(word), entity.generation());
+        }
     }
 }

@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use crate::EntityAllocError;
 
 /// Identifies one generation of an entity slot.
@@ -7,7 +9,7 @@ use crate::EntityAllocError;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Entity {
     index: u32,
-    generation: u32,
+    generation: NonZeroU32,
 }
 
 impl Entity {
@@ -17,16 +19,16 @@ impl Entity {
         self.index
     }
 
-    /// Returns the entity's generation within its slot.
+    /// Returns the entity's generation within its slot, starting at 1.
     #[must_use]
     pub const fn generation(self) -> u32 {
-        self.generation
+        self.generation.get()
     }
 }
 
 #[derive(Debug)]
 struct Slot {
-    generation: u32,
+    generation: NonZeroU32,
     state: SlotState,
 }
 
@@ -38,7 +40,7 @@ enum SlotState {
 }
 
 impl Slot {
-    fn is_live(&self, generation: u32) -> bool {
+    fn is_live(&self, generation: NonZeroU32) -> bool {
         self.generation == generation && matches!(self.state, SlotState::Live)
     }
 }
@@ -99,12 +101,12 @@ impl EntityAllocator {
             u32::try_from(self.slots.len()).map_err(|_| EntityAllocError::IndexExhausted)?;
         self.slots.try_reserve(1)?;
         self.slots.push(Slot {
-            generation: 0,
+            generation: NonZeroU32::MIN,
             state: SlotState::Live,
         });
         Ok(Entity {
             index,
-            generation: 0,
+            generation: NonZeroU32::MIN,
         })
     }
 
@@ -151,7 +153,10 @@ impl EntityAllocator {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use super::{Entity, EntityAllocator};
+    use crate::SparseSet;
 
     #[test]
     fn rejects_an_index_outside_the_allocator() {
@@ -170,28 +175,39 @@ mod tests {
     #[test]
     fn retires_a_slot_after_issuing_its_final_generation() {
         let mut entities = EntityAllocator::new();
+        let mut components = SparseSet::new();
         let original = entities.spawn().unwrap();
+        assert_eq!(original.generation(), 1);
         let other = entities.spawn().unwrap();
         let penultimate = Entity {
-            generation: u32::MAX - 1,
+            generation: NonZeroU32::new(u32::MAX - 1).unwrap(),
             ..original
         };
         entities.slots[original.index as usize].generation = penultimate.generation;
 
+        components.insert(penultimate, 11).unwrap();
+        assert_eq!(components.get(penultimate), Some(&11));
+        assert_eq!(components.remove(penultimate), Some(11));
         assert!(entities.despawn(penultimate));
         let last = entities.spawn().unwrap();
         assert_eq!(last.index(), original.index());
         assert_eq!(last.generation(), u32::MAX);
         assert!(entities.is_alive(last));
+        components.insert(last, 12).unwrap();
+        assert!(components.get(penultimate).is_none());
+        assert_eq!(components.get(last), Some(&12));
         assert!(entities.despawn(other));
+        assert_eq!(components.remove(last), Some(12));
         assert!(entities.despawn(last));
 
+        assert!(!entities.is_alive(penultimate));
         assert!(!entities.is_alive(last));
         assert!(!entities.despawn(last));
         let reused = entities.spawn().unwrap();
         assert_eq!(reused.index(), other.index());
         let fresh = entities.spawn().unwrap();
         assert_ne!(fresh.index(), last.index());
+        assert_eq!(fresh.generation(), 1);
         assert!(!entities.is_alive(original));
     }
 }
