@@ -4,7 +4,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use criterion::{Bencher, Criterion, Throughput, criterion_group, criterion_main};
-use mythraan_ecs::prelude::{Entity, EntityAllocator, SparseSet};
+use mythraan_ecs::prelude::{Entity, EntityAllocator, SparseSet, World};
 
 const DENSE_ROWS: usize = 2_048;
 const REMOVALS: usize = 256;
@@ -89,6 +89,63 @@ fn sparse_removal(c: &mut Criterion) {
     group.finish();
 }
 
+fn tracked_fixture() -> (World, Vec<Entity>) {
+    let mut world = World::new();
+    let dense = (0..DENSE_ROWS)
+        .map(|_| {
+            let entity = world.spawn().unwrap();
+            world.insert(entity, u64::from(entity.index())).unwrap();
+            entity
+        })
+        .collect();
+    (world, dense)
+}
+
+fn tracked_removal(c: &mut Criterion) {
+    let mut group = c.benchmark_group("component_remove_world");
+    group.throughput(Throughput::Elements(REMOVALS as u64));
+    for (name, position) in Position::cases() {
+        group.bench_function(name, |bencher| {
+            let (world, dense) = tracked_fixture();
+            measure_removals(
+                bencher,
+                world,
+                dense,
+                position,
+                World::remove::<u64>,
+                |world, entity| world.insert(entity, u64::from(entity.index())).unwrap(),
+            );
+        });
+    }
+    group.finish();
+}
+
+fn component_lookup(c: &mut Criterion) {
+    let (storage, sparse_entities) = sparse_fixture();
+    let (world, world_entities) = tracked_fixture();
+    let first = (DENSE_ROWS - REMOVALS) / 2;
+    let window = first..first + REMOVALS;
+    let sparse_entities = &sparse_entities[window.clone()];
+    let world_entities = &world_entities[window];
+    let mut group = c.benchmark_group("component_lookup");
+    group.throughput(Throughput::Elements(REMOVALS as u64));
+    group.bench_function("sparse", |bencher| {
+        bencher.iter(|| {
+            for &entity in black_box(sparse_entities) {
+                black_box(storage.get(entity).copied());
+            }
+        });
+    });
+    group.bench_function("world", |bencher| {
+        bencher.iter(|| {
+            for &entity in black_box(world_entities) {
+                black_box(world.get::<u64>(entity).copied());
+            }
+        });
+    });
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
@@ -96,7 +153,7 @@ criterion_group! {
         .sample_size(30)
         .warm_up_time(Duration::from_millis(650))
         .measurement_time(Duration::from_millis(1_350));
-    targets = sparse_removal
+    targets = sparse_removal, tracked_removal, component_lookup
 }
 
 criterion_main!(benches);
