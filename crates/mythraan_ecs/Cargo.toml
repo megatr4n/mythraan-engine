@@ -28,3 +28,7 @@ harness = false
 [[bench]]
 name = "world"
 harness = false
+
+[[bench]]
+name = "despawn"
+harness = false
