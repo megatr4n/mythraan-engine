@@ -138,6 +138,24 @@ fn single_query_reads_components_from_matching_entities() {
     assert_eq!(values, [(first, 40), (second, 80)]);
 }
 
+#[test]
+fn single_query_fold_pairs_the_remaining_entities_and_values() {
+    let mut world = World::new();
+    let entities = [(); 3].map(|()| world.spawn().unwrap());
+    let [first, second, third] = entities;
+    for (entity, health) in [(third, 30), (first, 10), (second, 20)] {
+        world.insert(entity, Health(health)).unwrap();
+    }
+
+    let mut query = world.query::<&Health>();
+    assert_eq!(query.next(), Some((third, &Health(30))));
+    let remaining = query.fold(Vec::new(), |mut rows, (entity, health)| {
+        rows.push((entity, health.0));
+        rows
+    });
+    assert_eq!(remaining, [(first, 10), (second, 20)]);
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct Position(i32);
 

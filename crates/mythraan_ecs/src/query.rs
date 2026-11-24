@@ -27,11 +27,7 @@ mod sealed {
             candidates: Range<usize>,
             init: B,
             visit: impl FnMut(B, (Entity, Self::Item<'world>)) -> B,
-        ) -> B {
-            candidates
-                .filter_map(|position| Self::row(state, position))
-                .fold(init, visit)
-        }
+        ) -> B;
     }
 }
 
@@ -138,5 +134,19 @@ impl<T: Send + Sync + 'static> sealed::Fetch for &T {
         position: usize,
     ) -> Option<(Entity, Self::Item<'world>)> {
         Some((*state.0.get(position)?, state.1.get(position)?))
+    }
+
+    fn fold<'world, B>(
+        state: &Self::State<'world>,
+        candidates: Range<usize>,
+        init: B,
+        visit: impl FnMut(B, (Entity, Self::Item<'world>)) -> B,
+    ) -> B {
+        let (Some(entities), Some(values)) =
+            (state.0.get(candidates.clone()), state.1.get(candidates))
+        else {
+            return init;
+        };
+        entities.iter().copied().zip(values).fold(init, visit)
     }
 }
