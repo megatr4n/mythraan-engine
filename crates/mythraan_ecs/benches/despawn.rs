@@ -195,6 +195,12 @@ const STORAGES: [Populate; 50] = populators!(
     26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
 );
 
+#[derive(Clone, Copy)]
+enum VisitOrder {
+    Shuffled,
+    Sequential,
+}
+
 struct DespawnFixture {
     world: World,
     targets: Vec<Entity>,
@@ -204,15 +210,17 @@ struct DespawnFixture {
 }
 
 impl DespawnFixture {
-    fn new(storage_count: usize, components: usize, extra: Extra) -> Self {
+    fn new(storage_count: usize, components: usize, extra: Extra, visit_order: VisitOrder) -> Self {
         let mut world = World::new();
         let targets = (0..DESPAWNS).map(|_| world.spawn().unwrap()).collect();
         let others: Vec<_> = (0..DESPAWNS).map(|_| world.spawn().unwrap()).collect();
         let mut order: Vec<_> = (0..DESPAWNS).collect();
-        let mut rng = Rng::from_seed(SHUFFLE_SEED);
-        for index in (1..order.len()).rev() {
-            let other = rng.range_u32(0..(index + 1) as u32).unwrap() as usize;
-            order.swap(index, other);
+        if let VisitOrder::Shuffled = visit_order {
+            let mut rng = Rng::from_seed(SHUFFLE_SEED);
+            for index in (1..order.len()).rev() {
+                let other = rng.range_u32(0..(index + 1) as u32).unwrap() as usize;
+                order.swap(index, other);
+            }
         }
 
         let mut fixture = Self {
@@ -324,8 +332,32 @@ fn despawn_axis<const N: usize>(
                 let (storages, components) = dimensions(count);
                 let id = BenchmarkId::new(format!("{path_name}_{extra_name}"), count);
                 group.bench_function(id, |bencher| {
-                    let fixture = DespawnFixture::new(storages, components, extra);
+                    let fixture =
+                        DespawnFixture::new(storages, components, extra, VisitOrder::Shuffled);
                     measure_despawn(bencher, fixture, path);
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
+fn despawn_order(c: &mut Criterion) {
+    let mut group = c.benchmark_group("despawn_order");
+    group.throughput(Throughput::Elements(DESPAWNS as u64));
+    let mut orders = [
+        ("sequential", VisitOrder::Sequential),
+        ("shuffled", VisitOrder::Shuffled),
+    ];
+    if std::env::var_os("MYTHRAAN_DESPAWN_REVERSE").is_some() {
+        orders.reverse();
+    }
+    for (path_name, path) in Despawn::cases() {
+        for (extra_name, extra) in Extra::cases() {
+            for (order_name, order) in orders {
+                let id = BenchmarkId::new(format!("{path_name}_{extra_name}"), order_name);
+                group.bench_function(id, |bencher| {
+                    measure_despawn(bencher, DespawnFixture::new(32, 4, extra, order), path);
                 });
             }
         }
@@ -340,7 +372,7 @@ criterion_group! {
         .sample_size(30)
         .warm_up_time(Duration::from_millis(650))
         .measurement_time(Duration::from_millis(1_350));
-    targets = sparse_removal, tracked_removal, component_lookup, despawn_storages, despawn_components
+    targets = sparse_removal, tracked_removal, component_lookup, despawn_storages, despawn_components, despawn_order
 }
 
 criterion_main!(benches);
