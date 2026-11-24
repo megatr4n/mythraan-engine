@@ -1,5 +1,5 @@
-use std::mem;
 use std::num::NonZeroU64;
+use std::{fmt, mem};
 
 use crate::change_detection::ComponentTicks;
 use crate::{Entity, SparseSetError};
@@ -60,12 +60,37 @@ impl<'world> SparseIndex<'world> {
 /// assert_eq!(health.get(entity), Some(&100));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug)]
 pub struct SparseSet<T> {
     sparse: Vec<SparseSlot>,
     entities: Vec<Entity>,
     values: Vec<T>,
     ticks: Option<Vec<ComponentTicks>>,
+}
+
+struct DebugSlots<'a>(&'a [SparseSlot]);
+
+impl fmt::Debug for DebugSlots<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        for slot in self.0 {
+            match slot {
+                Some(word) => list.entry(&(word.get() as u32, slot_generation(word.get()))),
+                None => list.entry(&None::<()>),
+            };
+        }
+        list.finish()
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for SparseSet<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SparseSet")
+            .field("sparse", &DebugSlots(&self.sparse))
+            .field("entities", &self.entities)
+            .field("values", &self.values)
+            .field("ticks", &self.ticks)
+            .finish()
+    }
 }
 
 impl<T> SparseSet<T> {
@@ -288,6 +313,21 @@ impl<T> Default for SparseSet<T> {
 mod tests {
     use super::{SparseSet, SparseSlot, pack_slot, slot_generation};
     use crate::EntityAllocator;
+
+    #[test]
+    fn debug_decodes_positions_and_generations_after_reuse() {
+        let mut allocator = EntityAllocator::new();
+        let first = allocator.spawn().unwrap();
+        let second = allocator.spawn().unwrap();
+        let mut storage = SparseSet::new();
+        storage.insert(first, 10).unwrap();
+        storage.insert(second, 20).unwrap();
+        storage.remove(first);
+        assert!(allocator.despawn(first));
+        let replacement = allocator.spawn().unwrap();
+        storage.insert(replacement, 30).unwrap();
+        assert!(format!("{storage:?}").contains("sparse: [(1, 2), (0, 1), None, None]"));
+    }
 
     #[test]
     fn one_word_encodes_both_dense_position_boundaries() {
