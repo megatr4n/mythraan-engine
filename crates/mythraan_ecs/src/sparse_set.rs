@@ -61,6 +61,7 @@ impl<'world> SparseIndex<'world> {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub struct SparseSet<T> {
+    pub(crate) membership_id: u32,
     sparse: Vec<SparseSlot>,
     entities: Vec<Entity>,
     values: Vec<T>,
@@ -98,6 +99,7 @@ impl<T> SparseSet<T> {
     #[must_use]
     pub const fn new() -> Self {
         Self {
+            membership_id: 0,
             sparse: Vec::new(),
             entities: Vec::new(),
             values: Vec::new(),

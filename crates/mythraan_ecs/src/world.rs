@@ -8,14 +8,16 @@ use crate::component_storage::ComponentStorage;
 use crate::hierarchy::Hierarchy;
 use crate::{
     ChangeTickError, Children, Entity, EntityAllocError, EntityAllocator, HierarchyError, Parent,
-    Query, QueryError, QueryFilter, QueryMut, ReadQuery, Resources, SparseSet, WorldInsertError,
-    WriteQuery,
+    Query, QueryError, QueryFilter, QueryMut, ReadQuery, Resources, SparseSet, SparseSetError,
+    WorldInsertError, WriteQuery,
 };
 
+mod membership;
 #[cfg(feature = "reflect")]
 mod reflection;
 mod scope;
 mod transforms;
+use membership::{MEMBERSHIP_THRESHOLD, Membership};
 pub(crate) use scope::{Borrowed, ensure_access};
 pub use scope::{ScopedComponents, ScopedResources, SystemScope};
 use transforms::TransformPropagation;
@@ -43,6 +45,7 @@ use transforms::TransformPropagation;
 pub struct World {
     entities: EntityAllocator,
     components: BTreeMap<TypeId, Box<dyn ComponentStorage>>,
+    membership: Option<Membership>,
     resources: Resources,
     change_tick: NonZeroU64,
     hierarchy: Hierarchy,
@@ -56,6 +59,7 @@ impl Default for World {
         Self {
             entities: EntityAllocator::new(),
             components: BTreeMap::new(),
+            membership: None,
             resources: Resources::new(),
             change_tick: NonZeroU64::MIN,
             hierarchy: Hierarchy::default(),
@@ -123,8 +127,8 @@ impl World {
 
     /// Removes an entity, its descendants, and their components.
     ///
-    /// Returns false if the entity identifier is not live. Cleanup visits each
-    /// registered component storage before the entity slot can be reused.
+    /// Returns false if the entity identifier is not live. Cleanup removes its
+    /// components before the entity slot can be reused.
     /// Descendants are removed before parents. If a destructor unwinds, its
     /// entity remains live and a retry resumes cleanup of the remaining subtree.
     pub fn despawn(&mut self, entity: Entity) -> bool {
@@ -140,8 +144,12 @@ impl World {
                 leaf = *child;
                 continue;
             }
-            for storage in self.components.values_mut() {
-                storage.remove_entity(leaf);
+            if let Some(membership) = &mut self.membership {
+                membership.despawn(&mut self.components, leaf);
+            } else {
+                for storage in self.components.values_mut() {
+                    storage.remove_entity(leaf);
+                }
             }
             let parent = self.hierarchy.detach(leaf);
             let removed = self.entities.despawn(leaf);
@@ -285,15 +293,60 @@ impl World {
                         component: type_name::<T>(),
                     },
                 )?;
-                Ok(storage.insert_at_tick(entity, component, tick)?)
+                if let Some(membership) = &mut self.membership {
+                    let row = entity.index() as usize;
+                    let id = storage.membership_id;
+                    membership
+                        .prepare(row, id)
+                        .map_err(SparseSetError::Reserve)?;
+                    let previous = storage.insert_at_tick(entity, component, tick)?;
+                    if previous.is_none() {
+                        membership.add(row, id);
+                    }
+                    Ok(previous)
+                } else {
+                    Ok(storage.insert_at_tick(entity, component, tick)?)
+                }
             }
-            Entry::Vacant(entry) => {
-                let mut storage = SparseSet::tracked();
-                let previous = storage.insert_at_tick(entity, component, tick)?;
-                entry.insert(Box::new(storage));
-                Ok(previous)
-            }
+            Entry::Vacant(_) => self.insert_new_type(entity, component, tick),
         }
+    }
+
+    #[cold]
+    fn insert_new_type<T: Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+        component: T,
+        tick: u64,
+    ) -> Result<Option<T>, WorldInsertError> {
+        let ty = TypeId::of::<T>();
+        let mut storage = SparseSet::tracked();
+        let previous = storage.insert_at_tick(entity, component, tick)?;
+        let row = entity.index() as usize;
+        if let Some(membership) = &mut self.membership {
+            let id = u32::try_from(membership.next_id()).map_err(|_| {
+                SparseSetError::IndexOutOfRange {
+                    index: entity.index(),
+                }
+            })?;
+            membership
+                .prepare_type(row, id)
+                .map_err(SparseSetError::Reserve)?;
+            storage.membership_id = id;
+            membership.register(ty);
+            membership.add(row, id);
+        } else if self.components.len() + 1 == MEMBERSHIP_THRESHOLD {
+            // Stage the complete index before assigning IDs or publishing the new storage.
+            let membership =
+                Membership::build(&self.components, ty, entity).map_err(SparseSetError::Reserve)?;
+            for (id, existing) in self.components.values_mut().enumerate() {
+                existing.set_membership_id(id as u32);
+            }
+            storage.membership_id = self.components.len() as u32;
+            self.membership = Some(membership);
+        }
+        self.components.insert(ty, Box::new(storage));
+        Ok(previous)
     }
 
     /// Borrows an entity's component of the requested type.
@@ -328,7 +381,10 @@ impl World {
     /// Returns `None` if the entity is not live or lacks the component.
     /// Removing a `Transform` also clears its derived `GlobalTransform`.
     pub fn remove<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<T> {
-        let removed = self.storage_mut::<T>(entity)?.remove(entity)?;
+        if !self.is_alive(entity) {
+            return None;
+        }
+        let removed = self.remove_component::<T>(entity)?;
         let id = TypeId::of::<T>();
         if id == TypeId::of::<Transform>() {
             if self.children(entity).is_some() {
@@ -338,11 +394,19 @@ impl World {
                     self.transforms.rebuild = true;
                 }
             }
-            if let Some(storage) = self.storage_mut::<GlobalTransform>(entity) {
-                storage.remove(entity);
-            }
+            self.remove_component::<GlobalTransform>(entity);
         } else {
             self.transforms.invalidate(id);
+        }
+        Some(removed)
+    }
+
+    fn remove_component<T: Send + Sync + 'static>(&mut self, entity: Entity) -> Option<T> {
+        let erased: &mut dyn Any = self.components.get_mut(&TypeId::of::<T>())?.as_mut();
+        let storage = erased.downcast_mut::<SparseSet<T>>()?;
+        let removed = storage.remove(entity)?;
+        if let Some(membership) = &mut self.membership {
+            membership.remove(entity.index() as usize, storage.membership_id);
         }
         Some(removed)
     }
@@ -358,6 +422,9 @@ impl World {
         erased.downcast_mut()
     }
 }
+
+#[cfg(test)]
+mod membership_tests;
 
 #[cfg(test)]
 mod tests {
