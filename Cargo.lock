@@ -550,6 +550,7 @@ dependencies = [
  "criterion",
  "mythraan_math",
  "mythraan_reflect",
+ "proptest",
  "rayon",
  "thiserror",
 ]
