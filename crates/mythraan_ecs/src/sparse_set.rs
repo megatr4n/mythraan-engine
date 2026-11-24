@@ -32,6 +32,16 @@ impl<'world> SparseIndex<'world> {
         let word = self.sparse.get(sparse_index)?.as_ref()?.get();
         (slot_generation(word) == entity.generation()).then_some(word as u32 as usize)
     }
+
+    pub(crate) fn contains(self, entity: Entity) -> bool {
+        let Ok(index) = usize::try_from(entity.index()) else {
+            return false;
+        };
+        self.sparse.get(index).is_some_and(|slot| {
+            // Empty slots report generation zero. No entity has that generation.
+            slot_generation(slot.map_or(0, NonZeroU64::get)) == entity.generation()
+        })
+    }
 }
 
 /// Stores one packed component per entity index within a single allocator.
@@ -270,7 +280,7 @@ impl<T> Default for SparseSet<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SparseSlot, pack_slot, slot_generation};
+    use super::{SparseSet, SparseSlot, pack_slot, slot_generation};
     use crate::EntityAllocator;
 
     #[test]
@@ -282,5 +292,27 @@ mod tests {
             assert_eq!(word as u32, position);
             assert_eq!(slot_generation(word), entity.generation());
         }
+    }
+
+    #[test]
+    fn membership_rejects_holes_out_of_range_and_stale_generations() {
+        let mut entities = EntityAllocator::new();
+        let stale = entities.spawn().unwrap();
+        let hole = entities.spawn().unwrap();
+        let last = entities.spawn().unwrap();
+        let outside = entities.spawn().unwrap();
+        let mut components = SparseSet::new();
+        components.insert(last, 5).unwrap();
+        assert!(entities.despawn(stale));
+        let live = entities.spawn().unwrap();
+        assert_eq!(live.index(), stale.index());
+        components.insert(live, 8).unwrap();
+
+        let (index, _, _) = components.query_parts_ref();
+        assert!(index.contains(last));
+        assert!(index.contains(live));
+        assert!(!index.contains(stale));
+        assert!(!index.contains(hole));
+        assert!(!index.contains(outside));
     }
 }

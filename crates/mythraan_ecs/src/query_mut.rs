@@ -283,14 +283,17 @@ struct PreparedFilter<'world> {
 
 impl PreparedFilter<'_> {
     fn matches(&self, entity: Entity, after_tick: u64) -> bool {
-        let position = self.index.position(entity);
         match self.access {
-            Access::With => position.is_some(),
-            Access::Without => position.is_none(),
-            Access::Added => position
+            Access::With => self.index.contains(entity),
+            Access::Without => !self.index.contains(entity),
+            Access::Added => self
+                .index
+                .position(entity)
                 .and_then(|position| self.ticks.get(position))
                 .is_some_and(|ticks| ticks.added > after_tick),
-            Access::Changed => position
+            Access::Changed => self
+                .index
+                .position(entity)
                 .and_then(|position| self.ticks.get(position))
                 .is_some_and(|ticks| ticks.changed() > after_tick),
             _ => false,
