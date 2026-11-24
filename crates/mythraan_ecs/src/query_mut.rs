@@ -204,12 +204,18 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
             });
         }
 
-        let candidates = requested()
+        let driver = requested()
             .filter(|request| !matches!(request.access, Access::Optional | Access::Without))
-            .map(|request| index_of(&columns, request.id).entities())
-            .min_by_key(|source| source.len());
-        let filters = filters.map(|filter| {
-            filter.map(|filter| {
+            .map(|request| (request.id, index_of(&columns, request.id).entities()))
+            .min_by_key(|(_, source)| source.len());
+        let mut filters = filters
+            .into_iter()
+            .flatten()
+            // Every candidate already belongs to the driving storage.
+            .filter(|filter| {
+                !matches!(driver, Some((id, _)) if filter.access == Access::With && filter.id == id)
+            })
+            .map(|filter| {
                 let (index, ticks) = column_of(&columns, filter.id)
                     .map(|column| (column.index, column.ticks))
                     .unwrap_or_default();
@@ -218,12 +224,12 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
                     ticks,
                     access: filter.access,
                 }
-            })
-        });
+            });
+        let filters = std::array::from_fn(|_| filters.next());
         let state = Q::prepare(&mut columns);
         Ok(Self {
             entities,
-            candidates,
+            candidates: driver.map(|(_, source)| source),
             filters,
             after_tick,
             state,

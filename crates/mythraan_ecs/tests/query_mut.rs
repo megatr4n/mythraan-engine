@@ -136,6 +136,34 @@ fn combined_filters_update_only_matching_entities() {
 }
 
 #[test]
+fn a_presence_driver_keeps_the_other_membership_checks() {
+    let mut world = World::new();
+    let [player_only, ready_a, ready_b, blocked, extra_a, extra_b] =
+        [(); 6].map(|()| world.spawn().unwrap());
+    for entity in [ready_a, ready_b, blocked, extra_a, extra_b] {
+        world.insert(entity, Position(0)).unwrap();
+    }
+    for entity in [ready_b, player_only, blocked, ready_a] {
+        world.insert(entity, Player).unwrap();
+    }
+    world.insert(blocked, Frozen).unwrap();
+
+    let mut visited = Vec::new();
+    world
+        .query_filtered_mut::<&mut Position, (With<Player>, Without<Frozen>)>()
+        .unwrap()
+        .for_each(|entity, position| {
+            position.0 += 1;
+            visited.push(entity);
+        });
+    assert_eq!(visited, [ready_b, ready_a]);
+    assert_eq!(world.get::<Position>(ready_a), Some(&Position(1)));
+    assert_eq!(world.get::<Position>(ready_b), Some(&Position(1)));
+    assert_eq!(world.get::<Position>(blocked), Some(&Position(0)));
+    assert_eq!(world.get::<Position>(player_only), None);
+}
+
+#[test]
 fn checking_presence_does_not_conflict_with_mutation() {
     let mut world = World::new();
     let entity = world.spawn().unwrap();
