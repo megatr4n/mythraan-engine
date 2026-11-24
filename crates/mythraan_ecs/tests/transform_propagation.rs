@@ -223,7 +223,7 @@ fn propagation_repairs_edited_or_removed_derived_values() {
 
 #[test]
 fn propagation_handles_a_deep_chain_from_root_to_leaf() {
-    const DEPTH: u16 = 16_384;
+    const DEPTH: u16 = if cfg!(miri) { 192 } else { 16_384 };
     let mut world = World::new();
     let leaf = world.spawn().unwrap();
     let mut root = leaf;
@@ -237,7 +237,7 @@ fn propagation_handles_a_deep_chain_from_root_to_leaf() {
 
     world.propagate_transforms().unwrap();
     assert_eq!(world.query::<&GlobalTransform>().count(), 0);
-    for entity in chain {
+    for &entity in &chain {
         world
             .insert(
                 entity,
@@ -249,9 +249,28 @@ fn propagation_handles_a_deep_chain_from_root_to_leaf() {
             .unwrap();
     }
 
+    world.advance_change_tick().unwrap();
     world.propagate_transforms().unwrap();
     assert_eq!(origin(&world, leaf), Vec3::X * f32::from(DEPTH));
     world.get_mut::<Transform>(root).unwrap().translation = Vec3::X * 2.0;
     world.propagate_transforms().unwrap();
     assert_eq!(origin(&world, leaf), Vec3::X * (f32::from(DEPTH) + 1.0));
+
+    let branch_len = DEPTH / 2;
+    let branch = &chain[..usize::from(branch_len)];
+    let branch_root = *branch.last().unwrap();
+    world.set_parent(branch_root, Some(root)).unwrap();
+    world.propagate_transforms().unwrap();
+    assert_eq!(
+        origin(&world, leaf),
+        Vec3::X * (f32::from(branch_len) + 2.0)
+    );
+
+    assert!(world.despawn(branch_root));
+    world.propagate_transforms().unwrap();
+    assert!(branch.iter().all(|&entity| !world.is_alive(entity)));
+    let remaining = usize::from(DEPTH - branch_len);
+    assert_eq!(world.query::<&Transform>().count(), remaining);
+    assert_eq!(world.query::<&GlobalTransform>().count(), remaining);
+    assert_eq!(origin(&world, root), Vec3::X * 2.0);
 }
