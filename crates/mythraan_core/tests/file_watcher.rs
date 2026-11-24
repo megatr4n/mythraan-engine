@@ -1,4 +1,8 @@
 //! Exercises real file changes through the public watcher API.
+//!
+//! This timing-sensitive integration test waits for asynchronous OS notifications.
+//! The macOS sandbox can suppress those notifications, so a run may time out
+//! without any events. Run this test outside that sandbox to exercise the backend.
 
 use std::fs;
 use std::path::{Path, PathBuf};
