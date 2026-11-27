@@ -15,6 +15,7 @@ pub trait Fetch {
     fn visit_dense(
         _state: &mut Self::State<'_>,
         _source: &[Entity],
+        _all_rows: bool,
         _matches: &mut impl FnMut(Entity) -> bool,
         _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
@@ -35,6 +36,7 @@ pub trait Field {
     fn visit_dense(
         _state: &mut Self::State<'_>,
         _source: &[Entity],
+        _all_rows: bool,
         _matches: &mut impl FnMut(Entity) -> bool,
         _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
@@ -115,6 +117,20 @@ pub struct WriteState<'world, T> {
     tick: u64,
 }
 
+struct ChangedPrefix<'a> {
+    stamps: &'a [ComponentTicks],
+    tick: u64,
+    yielded: usize,
+}
+
+impl Drop for ChangedPrefix<'_> {
+    fn drop(&mut self) {
+        for stamp in self.stamps.iter().take(self.yielded) {
+            stamp.mark_changed(self.tick);
+        }
+    }
+}
+
 impl<T: Send + Sync + 'static> Field for &mut T {
     type State<'world> = WriteState<'world, T>;
     type Item<'row> = &'row mut T;
@@ -149,6 +165,7 @@ impl<T: Send + Sync + 'static> Field for &mut T {
     fn visit_dense(
         state: &mut Self::State<'_>,
         source: &[Entity],
+        all_rows: bool,
         matches: &mut impl FnMut(Entity) -> bool,
         visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
@@ -161,6 +178,20 @@ impl<T: Send + Sync + 'static> Field for &mut T {
         }
 
         let tick = state.tick;
+        if all_rows {
+            let mut prefix = ChangedPrefix {
+                stamps: state.ticks,
+                tick,
+                yielded: 0,
+            };
+            for (entity, value) in source.iter().copied().zip(&mut *state.values) {
+                // Count this row before calling the visitor so unwinding stamps it too.
+                prefix.yielded += 1;
+                visit(entity, value);
+            }
+            return true;
+        }
+
         for ((entity, value), stamp) in source
             .iter()
             .copied()
@@ -192,10 +223,11 @@ impl<T: Field> Fetch for T {
     fn visit_dense(
         state: &mut Self::State<'_>,
         source: &[Entity],
+        all_rows: bool,
         matches: &mut impl FnMut(Entity) -> bool,
         visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
-        T::visit_dense(state, source, matches, visit)
+        T::visit_dense(state, source, all_rows, matches, visit)
     }
 }
 

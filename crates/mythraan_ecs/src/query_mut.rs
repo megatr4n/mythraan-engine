@@ -238,7 +238,19 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
 
     /// Calls `visit` with the requested components of every matching entity.
     ///
-    /// Each yielded mutable reference marks its component as changed.
+    /// Yielding `&mut T` marks the component as changed, even when the
+    /// callback never writes through the reference. This can produce extra
+    /// matches for [`Changed<T>`](Changed) compared with tracking writes alone.
+    /// If the callback panics, the row it received and all earlier yielded
+    /// rows still count as changed.
+    ///
+    /// Bevy's [`Mut<T>`] marks on mutable access through the wrapper, such as
+    /// a write that invokes `DerefMut`. That finer distinction requires
+    /// tracking individual accesses and rules out stamping the whole yielded
+    /// prefix. An explicit change-reporting API could let systems identify
+    /// the components they actually changed in the future.
+    ///
+    /// [`Mut<T>`]: https://docs.rs/bevy_ecs/latest/bevy_ecs/change_detection/trait.DetectChangesMut.html
     pub fn for_each(mut self, mut visit: impl for<'row> FnMut(Entity, Q::Item<'row>)) {
         let Some(state) = self.state.as_mut() else {
             return;
@@ -256,7 +268,7 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
                 .all(|filter| filter.matches(entity, self.after_tick))
         };
         if let Some(source) = self.candidates
-            && Q::visit_dense(state, source, &mut matches, &mut visit)
+            && Q::visit_dense(state, source, end == 0, &mut matches, &mut visit)
         {
             return;
         }
