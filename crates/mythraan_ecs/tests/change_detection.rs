@@ -1,6 +1,10 @@
 //! Change detection through the public ECS API.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+use mythraan_ecs::QueryFilter;
 use mythraan_ecs::prelude::{Added, Changed, CommandBuffer, Entity, With, Without, World};
+use mythraan_math::rng::Rng;
 
 fn added(world: &mut World) -> Vec<Entity> {
     let mut matches = Vec::new();
@@ -231,4 +235,129 @@ fn deferred_writes_are_tracked_at_flush_time() {
     world.advance_change_tick().unwrap();
     assert!(added(&mut world).is_empty());
     assert!(changed(&mut world).is_empty());
+}
+
+struct NeverInserted;
+
+fn dense_tick_fixture(values: &[(u32, bool)], removed: usize) -> World {
+    let mut world = World::new();
+    let entities: Vec<_> = values
+        .iter()
+        .map(|&(value, blocked)| {
+            let entity = world.spawn().unwrap();
+            world.insert(entity, value).unwrap();
+            if blocked {
+                world.insert(entity, true).unwrap();
+            }
+            entity
+        })
+        .collect();
+    let old = entities[removed];
+    world.advance_change_tick().unwrap();
+    world
+        .query_filtered_mut::<&mut u32, Without<bool>>()
+        .unwrap()
+        .for_each(|_, value| *value = value.wrapping_add(1));
+
+    world.advance_change_tick().unwrap();
+    let mut commands = CommandBuffer::new();
+    commands.despawn(old);
+    let spawn = commands.spawn();
+    commands.insert(&spawn, 17_u32);
+    let report = commands.flush(&mut world);
+    assert!(report.failures().is_empty());
+    let replacement = report.resolve(&spawn).unwrap();
+    assert_eq!(old.index(), replacement.index());
+    assert_ne!(old, replacement);
+    assert!(world.get::<u32>(old).is_none());
+    world
+}
+
+fn observed_since<F: QueryFilter>(world: &mut World, after: u64) -> Vec<(Entity, u32)> {
+    let mut rows = Vec::new();
+    world
+        .query_filtered_mut_since::<&u32, F>(after)
+        .unwrap()
+        .for_each(|entity, value| rows.push((entity, *value)));
+    rows
+}
+
+fn assert_tick_windows_match(actual: &mut World, reference: &mut World) {
+    for after in 0..=actual.change_tick() {
+        assert_eq!(
+            observed_since::<Changed<u32>>(actual, after),
+            observed_since::<Changed<u32>>(reference, after),
+            "Changed after tick {after}"
+        );
+        assert_eq!(
+            observed_since::<Added<u32>>(actual, after),
+            observed_since::<Added<u32>>(reference, after),
+            "Added after tick {after}"
+        );
+    }
+}
+
+#[test]
+fn dense_mutable_traversal_matches_per_row_stamping_across_worlds() {
+    let seeds = if cfg!(miri) { 8 } else { 256 };
+    for seed in 0..seeds {
+        let mut rng = Rng::from_seed(seed);
+        let len = 3 + rng.next_u32() as usize % if cfg!(miri) { 16 } else { 256 };
+        let values: Vec<_> = (0..len)
+            .map(|_| (rng.next_u32(), rng.next_u32().is_multiple_of(2)))
+            .collect();
+        let removed = rng.next_u32() as usize % (len - 1);
+        let mut actual = dense_tick_fixture(&values, removed);
+        let mut reference = dense_tick_fixture(&values, removed);
+
+        // Only the shared query implements Iterator. A partial read must leave
+        // the old change window intact before the exclusive traversal starts.
+        let before_read = changed(&mut actual);
+        assert_eq!(
+            actual.query::<&u32>().next(),
+            reference.query::<&u32>().next()
+        );
+        assert_eq!(changed(&mut actual), before_read);
+        assert_tick_windows_match(&mut actual, &mut reference);
+
+        actual.advance_change_tick().unwrap();
+        reference.advance_change_tick().unwrap();
+        actual.query_mut::<&mut u32>().unwrap().for_each(|_, _| {});
+        // This filter admits every row and retains the old per-row stamp path.
+        reference
+            .query_filtered_mut::<&mut u32, Without<NeverInserted>>()
+            .unwrap()
+            .for_each(|_, _| {});
+        assert_eq!(changed(&mut actual).len(), len);
+        assert!(added(&mut actual).is_empty());
+        assert_tick_windows_match(&mut actual, &mut reference);
+
+        actual.advance_change_tick().unwrap();
+        reference.advance_change_tick().unwrap();
+        let limit = 1 + rng.next_u32() as usize % (len - 1);
+        let mut visits = Vec::new();
+        let mut reference_visits = Vec::new();
+        for (world, visited, use_reference) in [
+            (&mut actual, &mut visits, false),
+            (&mut reference, &mut reference_visits, true),
+        ] {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let query = if use_reference {
+                    world.query_filtered_mut::<&mut u32, Without<NeverInserted>>()
+                } else {
+                    world.query_mut::<&mut u32>()
+                };
+                query.unwrap().for_each(|entity, value| {
+                    visited.push(entity);
+                    assert_ne!(visited.len(), limit, "stop after yielding the row");
+                    *value = value.wrapping_add(1);
+                });
+            }));
+            assert!(result.is_err());
+            assert_eq!(visited.len(), limit);
+            assert_eq!(changed(world), *visited);
+        }
+        assert_eq!(visits, reference_visits);
+        assert_tick_windows_match(&mut actual, &mut reference);
+    }
 }
