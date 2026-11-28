@@ -6,3 +6,5 @@
   `Option<Entity>` occupies 8 bytes (previously 12).
 - `SparseSet` debug output shows occupied slots as `(dense_index, generation)`
   and empty slots as `None`.
+- Restored the four-argument `WriteQuery` dense-visit call. Dense traversal
+  hooks are hidden from the generated API documentation.

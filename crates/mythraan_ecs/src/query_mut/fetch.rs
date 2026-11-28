@@ -12,11 +12,20 @@ pub trait Fetch {
     fn prepare<'world>(columns: &mut Columns<'world>) -> Option<Self::State<'world>>;
     fn get<'row>(state: &'row mut Self::State<'_>, entity: Entity) -> Option<Self::Item<'row>>;
 
+    #[doc(hidden)]
     fn visit_dense(
         _state: &mut Self::State<'_>,
         _source: &[Entity],
-        _all_rows: bool,
         _matches: &mut impl FnMut(Entity) -> bool,
+        _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        false
+    }
+
+    #[doc(hidden)]
+    fn visit_dense_unfiltered(
+        _state: &mut Self::State<'_>,
+        _source: &[Entity],
         _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
         false
@@ -36,8 +45,15 @@ pub trait Field {
     fn visit_dense(
         _state: &mut Self::State<'_>,
         _source: &[Entity],
-        _all_rows: bool,
         _matches: &mut impl FnMut(Entity) -> bool,
+        _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        false
+    }
+
+    fn visit_dense_unfiltered(
+        _state: &mut Self::State<'_>,
+        _source: &[Entity],
         _visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
         false
@@ -117,6 +133,15 @@ pub struct WriteState<'world, T> {
     tick: u64,
 }
 
+impl<T> WriteState<'_, T> {
+    fn matches_dense_source(&self, source: &[Entity]) -> bool {
+        // The selected driver must share this column's dense row order.
+        std::ptr::eq(source, self.index.entities())
+            && source.len() == self.values.len()
+            && source.len() == self.ticks.len()
+    }
+}
+
 struct ChangedPrefix<'a> {
     stamps: &'a [ComponentTicks],
     tick: u64,
@@ -165,33 +190,14 @@ impl<T: Send + Sync + 'static> Field for &mut T {
     fn visit_dense(
         state: &mut Self::State<'_>,
         source: &[Entity],
-        all_rows: bool,
         matches: &mut impl FnMut(Entity) -> bool,
         visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
-        // The selected driver must share this column's dense row order.
-        if !std::ptr::eq(source, state.index.entities())
-            || source.len() != state.values.len()
-            || source.len() != state.ticks.len()
-        {
+        if !state.matches_dense_source(source) {
             return false;
         }
 
         let tick = state.tick;
-        if all_rows {
-            let mut prefix = ChangedPrefix {
-                stamps: state.ticks,
-                tick,
-                yielded: 0,
-            };
-            for (entity, value) in source.iter().copied().zip(&mut *state.values) {
-                // Count this row before calling the visitor so unwinding stamps it too.
-                prefix.yielded += 1;
-                visit(entity, value);
-            }
-            return true;
-        }
-
         for ((entity, value), stamp) in source
             .iter()
             .copied()
@@ -202,6 +208,28 @@ impl<T: Send + Sync + 'static> Field for &mut T {
                 stamp.mark_changed(tick);
                 visit(entity, value);
             }
+        }
+        true
+    }
+
+    fn visit_dense_unfiltered(
+        state: &mut Self::State<'_>,
+        source: &[Entity],
+        visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        if !state.matches_dense_source(source) {
+            return false;
+        }
+
+        let mut prefix = ChangedPrefix {
+            stamps: state.ticks,
+            tick: state.tick,
+            yielded: 0,
+        };
+        for (entity, value) in source.iter().copied().zip(&mut *state.values) {
+            // Count this row before calling the visitor so unwinding stamps it too.
+            prefix.yielded += 1;
+            visit(entity, value);
         }
         true
     }
@@ -223,11 +251,18 @@ impl<T: Field> Fetch for T {
     fn visit_dense(
         state: &mut Self::State<'_>,
         source: &[Entity],
-        all_rows: bool,
         matches: &mut impl FnMut(Entity) -> bool,
         visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
     ) -> bool {
-        T::visit_dense(state, source, all_rows, matches, visit)
+        T::visit_dense(state, source, matches, visit)
+    }
+
+    fn visit_dense_unfiltered(
+        state: &mut Self::State<'_>,
+        source: &[Entity],
+        visit: &mut impl for<'row> FnMut(Entity, Self::Item<'row>),
+    ) -> bool {
+        T::visit_dense_unfiltered(state, source, visit)
     }
 }
 

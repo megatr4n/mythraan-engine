@@ -244,6 +244,11 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
     /// If the callback panics, the row it received and all earlier yielded
     /// rows still count as changed.
     ///
+    /// A dense query of one `&mut T` batches its change ticks when no row
+    /// filters remain. This includes [`With<T>`](With) on that same component
+    /// because every row in the column already has `T`. Filters on another
+    /// component, [`Without`], [`Changed`], and [`Added`] use per-row marking.
+    ///
     /// Bevy's [`Mut<T>`] marks on mutable access through the wrapper, such as
     /// a write that invokes `DerefMut`. That finer distinction requires
     /// tracking individual accesses and rules out stamping the whole yielded
@@ -267,10 +272,15 @@ impl<'world, Q: WriteQuery> QueryMut<'world, Q> {
                 .flatten()
                 .all(|filter| filter.matches(entity, self.after_tick))
         };
-        if let Some(source) = self.candidates
-            && Q::visit_dense(state, source, end == 0, &mut matches, &mut visit)
-        {
-            return;
+        if let Some(source) = self.candidates {
+            let visited = if end == 0 {
+                Q::visit_dense_unfiltered(state, source, &mut visit)
+            } else {
+                Q::visit_dense(state, source, &mut matches, &mut visit)
+            };
+            if visited {
+                return;
+            }
         }
 
         let visit_entity = |entity| {

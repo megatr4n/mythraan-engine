@@ -2,8 +2,8 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use mythraan_ecs::QueryFilter;
 use mythraan_ecs::prelude::{Added, Changed, CommandBuffer, Entity, With, Without, World};
+use mythraan_ecs::{QueryFilter, WriteQuery};
 use mythraan_math::rng::Rng;
 
 fn added(world: &mut World) -> Vec<Entity> {
@@ -38,6 +38,21 @@ fn change_ticks_start_at_one_and_advance_independently() {
     assert_eq!(first.advance_change_tick().unwrap(), 3);
     assert_eq!(first.change_tick(), 3);
     assert_eq!(other.change_tick(), 1);
+}
+
+#[test]
+fn write_query_retains_the_four_argument_dense_visit() {
+    fn visit<Q: WriteQuery>() -> Option<bool> {
+        let mut state = Q::prepare(&mut Default::default())?;
+        Some(Q::visit_dense(
+            &mut state,
+            &[],
+            &mut |_| true,
+            &mut |_, _| {},
+        ))
+    }
+
+    assert_eq!(visit::<Option<&u32>>(), Some(false));
 }
 
 #[test]
